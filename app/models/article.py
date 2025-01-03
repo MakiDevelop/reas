@@ -14,7 +14,7 @@ class Article(Base):
     title = Column(String(255), nullable=False)
     description = Column(Text)
     image_url = Column(Text)
-    content = Column(Text, nullable=False)
+    content = Column(Text, nullable=True)
     published_at = Column(DateTime, nullable=False, index=True)
     created_at = Column(DateTime, server_default=func.now())
     updated_at = Column(DateTime, server_default=func.now(), onupdate=func.now())

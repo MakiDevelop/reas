@@ -30,6 +30,10 @@ class Settings(BaseSettings):
         f"{os.getenv('POSTGRES_DB', 'newsdb')}"
     )
 
+    # Chrome 設定
+    CHROME_BIN: str = "/usr/bin/chromium"
+    CHROMEDRIVER_PATH: str = "/usr/bin/chromedriver"
+
     class Config:
         case_sensitive = True
 

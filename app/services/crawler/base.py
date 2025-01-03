@@ -25,15 +25,13 @@ class BaseCrawler(ABC):
             chrome_options.add_argument('--disable-dev-shm-usage')
             chrome_options.add_argument('--disable-gpu')
             chrome_options.add_argument('--window-size=1920,1080')
-            chrome_options.add_argument('--disable-extensions')
-            chrome_options.add_argument('--disable-infobars')
             chrome_options.binary_location = settings.CHROME_BIN
             
-            service = Service(executable_path=settings.CHROME_DRIVER_PATH)
+            service = Service(executable_path=settings.CHROMEDRIVER_PATH)
             
             logger.info(f"Setting up Chrome driver with options: {chrome_options.arguments}")
             logger.info(f"Chrome binary location: {settings.CHROME_BIN}")
-            logger.info(f"ChromeDriver path: {settings.CHROME_DRIVER_PATH}")
+            logger.info(f"ChromeDriver path: {settings.CHROMEDRIVER_PATH}")
             
             self.driver = webdriver.Chrome(service=service, options=chrome_options)
             self.driver.implicitly_wait(10)

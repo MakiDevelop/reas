@@ -31,5 +31,5 @@ COPY . .
 # 暴露端口
 EXPOSE 8000
 
-# 修改：直接指定完整的檔案路徑
+# 啟動命令
 CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000", "--reload", "--reload-dir", "/app"] 
