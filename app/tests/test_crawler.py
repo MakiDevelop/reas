@@ -6,7 +6,7 @@ from app.services.crawler.nextapple_crawler import NextAppleCrawler
 from app.core.database import SessionLocal
 from app.models.article import Article
 import pytest
-from datetime import datetime
+from datetime import datetime, timedelta
 import argparse
 import logging
 from sqlalchemy.ext.declarative import declarative_base
@@ -168,13 +168,54 @@ def test_nextapple_crawler():
     finally:
         db.close()
 
+def crawl_historical_data(start_date=None, end_date=None):
+    """回補指定日期範圍的文章"""
+    if not start_date:
+        start_date = (datetime.now() - timedelta(days=30)).strftime('%Y-%m-%d')
+    if not end_date:
+        end_date = datetime.now().strftime('%Y-%m-%d')
+        
+    logging.info(f"開始回補歷史文章 ({start_date} ~ {end_date})...")
+    
+    # 建立資料庫連線
+    engine = create_engine(DATABASE_URL)
+    SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
+    db = SessionLocal()
+    
+    try:
+        # 依序執行三個爬蟲
+        logging.info("開始執行 UDN 爬蟲...")
+        test_udn_crawler()
+        
+        logging.info("開始執行 NextApple 爬蟲...")
+        test_nextapple_crawler()
+        
+        logging.info("開始執行 LTN 爬蟲...")
+        asyncio.run(test_crawler('ltn'))
+        
+        logging.info("所有爬蟲執行完成")
+                
+    except Exception as e:
+        logging.error(f"回補程序執行失敗: {str(e)}")
+        raise
+    finally:
+        db.close()
+
 if __name__ == '__main__':
     parser = argparse.ArgumentParser()
-    parser.add_argument('crawler', choices=['ltn', 'udn', 'nextapple'], 
-                       default='ltn', help='指定要測試的爬蟲')
+    parser.add_argument('crawler', choices=['ltn', 'udn', 'nextapple', 'historical'], 
+                       help='指定要測試的爬蟲或執行歷史回補')
+    parser.add_argument('--start_date', 
+                       help='回補起始日期 (YYYY-MM-DD)',
+                       default=(datetime.now() - timedelta(days=30)).strftime('%Y-%m-%d'))
+    parser.add_argument('--end_date',
+                       help='回補結束日期 (YYYY-MM-DD)',
+                       default=datetime.now().strftime('%Y-%m-%d'))
     args = parser.parse_args()
     
-    if args.crawler == 'udn':
+    if args.crawler == 'historical':
+        crawl_historical_data(args.start_date, args.end_date)
+    elif args.crawler == 'udn':
         test_udn_crawler()
     elif args.crawler == 'nextapple':
         test_nextapple_crawler()
