@@ -1,9 +1,14 @@
-from fastapi import FastAPI
-from app.core.database import engine, Base
+from fastapi import FastAPI, Request, Depends, HTTPException
+from fastapi.templating import Jinja2Templates
+from fastapi.staticfiles import StaticFiles
+from app.core.database import engine, Base, get_db
 from app.api.v1.api import api_router
+from app.models.article import Article
 import logging
-from sqlalchemy import text
+from sqlalchemy import text, desc, or_
 from app.core.config import settings
+from math import ceil
+from sqlalchemy.orm import Session
 
 # 設定日誌
 logging.basicConfig(level=logging.INFO)
@@ -16,8 +21,96 @@ app = FastAPI(
     openapi_url=f"{settings.API_V1_STR}/openapi.json"
 )
 
-# 註冊 API 路由（只需要一次）
+# 註定模板和靜態檔案
+templates = Jinja2Templates(directory="app/templates")
+app.mount("/static", StaticFiles(directory="app/static"), name="static")
+
+# 註冊 API 路由
 app.include_router(api_router, prefix=settings.API_V1_STR)
+
+# 前台頁面路由
+@app.get("/")
+async def index(
+    request: Request, 
+    page: int = 1,
+    keyword: str = None,
+    source: str = None,
+    db: Session = Depends(get_db)
+):
+    # 設定每頁顯示數量
+    per_page = 20
+    
+    # 建立基本查詢
+    query = db.query(Article)
+    
+    # 加入搜尋條件
+    if keyword:
+        query = query.filter(
+            or_(
+                Article.title.ilike(f"%{keyword}%"),
+                Article.content.ilike(f"%{keyword}%")
+            )
+        )
+    
+    if source:
+        query = query.filter(Article.source == source)
+    
+    # 計算總數和頁數
+    total = query.count()
+    total_pages = ceil(total / per_page)
+    
+    # 取得分頁資料
+    articles = query\
+        .order_by(desc(Article.published_at))\
+        .offset((page - 1) * per_page)\
+        .limit(per_page)\
+        .all()
+    
+    # 取得所有來源選項
+    sources = db.query(Article.source).distinct().all()
+    sources = [source[0] for source in sources]
+    
+    return templates.TemplateResponse(
+        "index.html",
+        {
+            "request": request,
+            "articles": articles,
+            "current_page": page,
+            "total_pages": total_pages,
+            "total": total,
+            "keyword": keyword,
+            "source": source,
+            "sources": sources
+        }
+    )
+
+@app.get("/article/{id}")
+async def article_detail(
+    request: Request,
+    id: int,
+    db: Session = Depends(get_db)
+):
+    # 取得文章詳細資料
+    article = db.query(Article).filter(Article.id == id).first()
+    if not article:
+        raise HTTPException(status_code=404, detail="Article not found")
+    
+    # 取得相關文章（同一來源的最新5篇其他文章）
+    related_articles = db.query(Article)\
+        .filter(Article.source == article.source)\
+        .filter(Article.id != article.id)\
+        .order_by(desc(Article.published_at))\
+        .limit(5)\
+        .all()
+    
+    return templates.TemplateResponse(
+        "detail.html",
+        {
+            "request": request,
+            "article": article,
+            "related_articles": related_articles
+        }
+    )
 
 @app.on_event("startup")
 async def startup_event():
