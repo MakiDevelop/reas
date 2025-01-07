@@ -35,7 +35,7 @@ class UDNCrawler(BaseCrawler):
             
             # 如果沒有指定日期，或者日期範圍是今天，則限制為10頁
             if not start_date or (start_date == end_date == datetime.now().strftime("%Y-%m-%d")):
-                max_pages = 3
+                max_pages = 1
             else:
                 max_pages = 50
             

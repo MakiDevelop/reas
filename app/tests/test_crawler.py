@@ -38,31 +38,24 @@ def get_crawler(crawler_name: str):
 @pytest.mark.asyncio
 async def test_crawler(crawler_type="ltn", start_date=None, end_date=None):
 	"""測試爬蟲"""
-	# 根據參數選擇爬蟲
-	if crawler_type.lower() == "udn":
-		crawler = UDNCrawler()
-	elif crawler_type.lower() == "nextapple":
-		crawler = NextAppleCrawler()
-	else:
-		crawler = LTNCrawler()
-		
 	try:
-		# 根據爬蟲類型和是否有日期參數來決定爬取方式
-		if crawler_type.lower() == "nextapple":
-			articles = crawler.crawl(start_date=start_date, end_date=end_date)
+		# 根據參數選擇爬蟲
+		crawler = get_crawler(crawler_type.lower())
+		if not crawler:
+			raise ValueError(f"未知的爬蟲類型: {crawler_type}")
+
+		logger.info(f"開始爬取 {crawler_type} 文章 (日期範圍: {start_date} ~ {end_date})...")
+		
+		# 根據不同爬蟲使用對應的方法
+		if crawler_type.lower() == "ltn":
+			articles = await crawler.run(max_pages=1, start_date=start_date, end_date=end_date)
 		elif crawler_type.lower() == "udn":
-			print(f"開始爬取 UDN 文章，日期範圍：{start_date} 到 {end_date}")
 			articles = await crawler.crawl(start_date=start_date, end_date=end_date)
-			print(f"UDN 爬蟲完成，共爬取 {len(articles)} 篇文章")
-		else:
-			if start_date and end_date:
-				articles = await crawler.run(max_pages=50, start_date=start_date, end_date=end_date)
-			else:
-				# 只爬取前3頁
-				articles = await crawler.run(max_pages=3)
-			
+		else:  # nextapple
+			articles = crawler.crawl(start_date=start_date, end_date=end_date)  # 不需要 await
+		
 		if articles:
-			print(f"成功爬取 {len(articles)} 篇文章")
+			logger.info(f"成功爬取 {len(articles)} 篇文章")
 			
 			# 儲存到資料庫
 			db = SessionLocal()
@@ -71,47 +64,38 @@ async def test_crawler(crawler_type="ltn", start_date=None, end_date=None):
 				update_count = 0
 				for article in articles:
 					# 檢查文章是否已存在
-					if isinstance(article, Article):
-						# 如果是 Article 物件
-						existing = db.query(Article).filter(Article.url == article.url).first()
-						if existing:
-							# 更新現有文章
+					existing = db.query(Article).filter(Article.url == (article.url if isinstance(article, Article) else article["url"])).first()
+					
+					if existing:
+						# 更新現有文章
+						if isinstance(article, Article):
 							for key, value in article.__dict__.items():
 								if not key.startswith('_'):
 									setattr(existing, key, value)
-							update_count += 1
-							print(f"更新文章: {article.title}")
 						else:
-							# 新增文章
-							db.add(article)
-							new_count += 1
-							print(f"新增文章: {article.title}")
-					else:
-						# 如果是字典
-						existing = db.query(Article).filter(Article.url == article["url"]).first()
-						if existing:
-							# 更新現有文章
 							for key, value in article.items():
 								if not key.startswith('_'):
 									setattr(existing, key, value)
-							update_count += 1
-							print(f"更新文章: {article['title']}")
+						update_count += 1
+						logger.info(f"更新文章: {article.title if isinstance(article, Article) else article['title']}")
+					else:
+						# 新增文章
+						if isinstance(article, Article):
+							db.add(article)
 						else:
-							# 新增文章
-							article_obj = Article(**article)
-							db.add(article_obj)
-							new_count += 1
-							print(f"新增文章: {article['title']}")
+							db.add(Article(**article))
+						new_count += 1
+						logger.info(f"新增文章: {article.title if isinstance(article, Article) else article['title']}")
 							
 				db.commit()
-				print(f"資料儲存完成！新增 {new_count} 篇，更新 {update_count} 篇")
+				logger.info(f"資料儲存完成！新增 {new_count} 篇，更新 {update_count} 篇")
 			finally:
 				db.close()
 				
 		return len(articles) if articles else 0
 				
 	except Exception as e:
-		print(f"爬蟲執行失敗: {str(e)}")
+		logger.error(f"爬蟲執行失敗: {str(e)}")
 		raise
 
 def test_udn_crawler():
