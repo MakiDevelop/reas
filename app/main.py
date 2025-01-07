@@ -14,6 +14,9 @@ import subprocess
 from fastapi.responses import RedirectResponse
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from apscheduler.triggers.cron import CronTrigger
+from typing import Optional
+import asyncio
+from app.tests.test_crawler import test_crawler
 
 # 設定日誌
 logging.basicConfig(level=logging.INFO)
@@ -278,3 +281,55 @@ async def crawl_last_week(background_tasks: BackgroundTasks):
     except Exception as e:
         logger.error(f"爬蟲執行失敗: {str(e)}")
         return RedirectResponse(url="/?error=crawl_failed", status_code=303)
+
+@app.post("/api/crawl")
+async def crawl_articles(
+    start_date: Optional[str] = None,
+    end_date: Optional[str] = None,
+    crawler_type: Optional[str] = None
+):
+    """爬取文章"""
+    try:
+        results = []
+        crawlers = ["ltn", "udn", "nextapple"] if not crawler_type else [crawler_type]
+        
+        for source in crawlers:
+            try:
+                logger.info(f"開始爬取 {source} 文章...")
+                count = await test_crawler(
+                    crawler_type=source,
+                    start_date=start_date,
+                    end_date=end_date
+                )
+                results.append({
+                    "source": source,
+                    "status": "success",
+                    "count": count,
+                    "message": f"成功爬取 {count} 篇文章"
+                })
+                logger.info(f"{source} 爬蟲完成，共爬取 {count} 篇文章")
+                
+            except Exception as e:
+                logger.error(f"{source} 爬蟲失敗: {str(e)}")
+                results.append({
+                    "source": source,
+                    "status": "error",
+                    "count": 0,
+                    "message": f"爬取失敗: {str(e)}"
+                })
+                
+            # 每個爬蟲之間暫停一下
+            await asyncio.sleep(2)
+        
+        return {
+            "status": "success",
+            "message": "爬蟲執行完成",
+            "results": results
+        }
+        
+    except Exception as e:
+        logger.error(f"爬蟲執行失敗: {str(e)}")
+        raise HTTPException(
+            status_code=500,
+            detail=str(e)
+        )
