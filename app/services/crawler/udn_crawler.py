@@ -18,17 +18,20 @@ class UDNCrawler(BaseCrawler):
         self.source_name = "udn"
         self.base_url = "https://house.udn.com"
         
-    def crawl(self) -> list:
-        """同步爬取入口"""
-        return asyncio.run(self._crawl())
+    async def crawl(self, start_date: str = None, end_date: str = None) -> list:
+        """
+        同步爬取入口
+        :param start_date: 起始日期 (YYYY-MM-DD)
+        :param end_date: 結束日期 (YYYY-MM-DD)
+        """
+        return await self._crawl(start_date=start_date, end_date=end_date)
         
-    async def _crawl(self) -> list:
+    async def _crawl(self, start_date: str = None, end_date: str = None, max_pages: int = 50) -> list:
         """非同步爬取主邏輯"""
         try:
             self.setup_driver()
             articles = []
             page = 1
-            max_pages = 2
             
             while page <= max_pages:
                 logger.info(f"開始爬取第 {page} 頁的文章列表")

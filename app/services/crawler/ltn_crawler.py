@@ -20,68 +20,64 @@ class LTNCrawler(BaseCrawler):
     async def crawl_list(self, page: int = 1) -> list:
         """爬取文章列表"""
         try:
-            if page == 1:
-                logger.info(f"Crawling first page: {self.base_url}/news")
-                self.wait_and_get(f"{self.base_url}/news")
-                
-                # 等待文章列表載入
-                WebDriverWait(self.driver, 10).until(
-                    EC.presence_of_element_located((By.CLASS_NAME, "list_box"))
-                )
-                
-                # 找到所有文章連結（跳過第一個空的 li）
-                articles = self.driver.find_elements(By.CSS_SELECTOR, "li.listbox:not(:first-child) a.ph")
-                urls = []
-                for article in articles:
-                    try:
-                        url = article.get_attribute("href")
-                        if url and url.startswith("http"):
-                            urls.append(url)
-                    except Exception as e:
-                        logger.error(f"Error getting article URL: {str(e)}")
-                        continue
-                    
-            else:
-                # 其他頁面使用 AJAX 請求
-                ajax_url = f"{self.base_url}/ajaxList/news/{page}"
-                logger.info(f"Fetching AJAX page: {ajax_url}")
-                
-                headers = {
-                    'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
-                }
-                
-                response = requests.get(ajax_url, headers=headers)
-                if response.status_code == 200:
-                    try:
-                        articles_data = response.json()
-                        logger.info(f"Found {len(articles_data)} articles in JSON response")
-                        
-                        urls = []
-                        for article in articles_data:
-                            url = article.get('url', '').replace('\/', '/')
-                            if url and url.startswith('http'):
-                                urls.append(url)
-                                logger.info(f"Added URL: {url}")
-                                
-                    except Exception as e:
-                        logger.error(f"Error parsing JSON response: {str(e)}")
-                        return []
-                else:
-                    logger.error(f"AJAX request failed with status code: {response.status_code}")
-                    return []
+            # 所有頁面都使用 AJAX 請求
+            ajax_url = f"{self.base_url}/ajaxList/news/{page}"
+            logger.info(f"Fetching AJAX page: {ajax_url}")
             
-            # 移除重複的 URL
-            urls = list(set(urls))
-            logger.info(f"Found {len(urls)} unique articles on page {page}")
-            return urls
+            headers = {
+                'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
+            }
+            
+            response = requests.get(ajax_url, headers=headers)
+            if response.status_code == 200:
+                try:
+                    articles_data = response.json()
+                    logger.info(f"Found {len(articles_data)} articles in JSON response")
+                    
+                    article_data = []
+                    for article in articles_data:
+                        url = article.get('url', '').replace('\/', '/')
+                        date_str = article.get('A_PublishDT', '')
+                        
+                        if url and url.startswith('http'):
+                            try:
+                                published_at = datetime.strptime(date_str, "%Y-%m-%d %H:%M:%S")
+                            except ValueError:
+                                published_at = None
+                                logger.warning(f"無法解析日期: {date_str}")
+                            
+                            article_data.append({
+                                'url': url,
+                                'published_at': published_at
+                            })
+                            logger.info(f"Added URL: {url}")
+                            
+                except Exception as e:
+                    logger.error(f"Error parsing JSON response: {str(e)}")
+                    return []
+            else:
+                logger.error(f"AJAX request failed with status code: {response.status_code}")
+                return []
+            
+            # 移除重複的文章
+            seen_urls = set()
+            unique_articles = []
+            for article in article_data:
+                if article['url'] not in seen_urls:
+                    seen_urls.add(article['url'])
+                    unique_articles.append(article)
+            
+            logger.info(f"Found {len(unique_articles)} unique articles on page {page}")
+            return unique_articles
             
         except Exception as e:
             logger.error(f"Error crawling list page {page}: {str(e)}", exc_info=True)
             return []
     
-    async def crawl_article(self, url: str) -> dict:
+    async def crawl_article(self, article_info: dict) -> dict:
         """爬取文章內容"""
         try:
+            url = article_info['url']
             logger.info(f"Crawling article: {url}")
             self.wait_and_get(url)
             
@@ -107,12 +103,14 @@ class LTNCrawler(BaseCrawler):
             else:
                 published_text = author_text
             
-            # 處理日期格式 (例如: "2025/01/03 16:18")
-            try:
-                published_at = datetime.strptime(published_text, "%Y/%m/%d %H:%M")
-            except ValueError:
-                logger.error(f"無法解析日期: {published_text}")
-                published_at = None
+            # 使用列表頁的發布時間，如果沒有則從文章內容解析
+            published_at = article_info.get('published_at')
+            if not published_at:
+                try:
+                    published_at = datetime.strptime(published_text, "%Y/%m/%d %H:%M")
+                except ValueError:
+                    logger.error(f"無法解析日期: {published_text}")
+                    published_at = None
             
             # 取得內文
             content_div = self.driver.find_element(By.CSS_SELECTOR, "div.whitecon div.text")

@@ -8,6 +8,8 @@ from selenium.webdriver.support import expected_conditions as EC
 from app.core.config import settings
 import logging
 import time
+from datetime import datetime
+from typing import Optional, List, Dict, Any, Tuple
 
 logger = logging.getLogger(__name__)
 
@@ -15,7 +17,7 @@ class BaseCrawler(ABC):
     def __init__(self):
         self.driver = None
         self.source_name = ""
-        
+    
     def setup_driver(self):
         """設定 Selenium WebDriver"""
         try:
@@ -63,6 +65,22 @@ class BaseCrawler(ABC):
                     raise
                 time.sleep(2)
     
+    def parse_date_range(self, start_date: Optional[str], end_date: Optional[str]) -> Tuple[Optional[datetime], Optional[datetime]]:
+        """解析日期範圍"""
+        start_datetime = datetime.strptime(start_date, '%Y-%m-%d') if start_date else None
+        end_datetime = datetime.strptime(end_date, '%Y-%m-%d') if end_date else None
+        return start_datetime, end_datetime
+
+    def is_within_date_range(self, article_date: datetime, start_datetime: Optional[datetime], end_datetime: Optional[datetime]) -> bool:
+        """檢查文章日期是否在指定範圍內"""
+        if not article_date:
+            return False
+        if start_datetime and article_date.date() < start_datetime.date():
+            return False
+        if end_datetime and article_date.date() > end_datetime.date():
+            return False
+        return True
+    
     @abstractmethod
     async def crawl_list(self, page: int = 1) -> list:
         """爬取文章列表"""
@@ -73,15 +91,28 @@ class BaseCrawler(ABC):
         """爬取單篇文章"""
         pass
     
-    async def run(self, max_pages: int = 1):
+    async def run(self, max_pages: int = 1, start_date: str = None, end_date: str = None):
         """執行爬蟲"""
         try:
             self.setup_driver()
             articles = []
+            start_datetime, end_datetime = self.parse_date_range(start_date, end_date)
             
             for page in range(1, max_pages + 1):
                 try:
                     page_articles = await self.crawl_list(page)
+                    
+                    # 檢查是否已經超出日期範圍
+                    if start_datetime:
+                        oldest_article = min(
+                            (a for a in page_articles if a.get('published_at')),
+                            key=lambda x: x.get('published_at'),
+                            default=None
+                        )
+                        if oldest_article and oldest_article.get('published_at') < start_datetime:
+                            logger.info(f"已達到目標起始日期 {start_date}，停止爬取")
+                            break
+                    
                     articles.extend(page_articles)
                     logger.info(f"Crawled page {page}, got {len(page_articles)} articles")
                     time.sleep(1)
@@ -90,14 +121,23 @@ class BaseCrawler(ABC):
                     continue
             
             results = []
-            for article_url in articles:
+            for article_info in articles:
                 try:
-                    article_data = await self.crawl_article(article_url)
-                    results.append(article_data)
-                    logger.info(f"Crawled article: {article_data.get('title', 'Unknown')}")
+                    # 檢查文章日期是否在範圍內
+                    if not self.is_within_date_range(
+                        article_info.get('published_at'),
+                        start_datetime,
+                        end_datetime
+                    ):
+                        continue
+                        
+                    article_data = await self.crawl_article(article_info)
+                    if article_data:
+                        results.append(article_data)
+                        logger.info(f"Crawled article: {article_data.get('title', 'Unknown')}")
                     time.sleep(1)
                 except Exception as e:
-                    logger.error(f"Error crawling article {article_url}: {str(e)}", exc_info=True)
+                    logger.error(f"Error crawling article {article_info}: {str(e)}", exc_info=True)
                     continue
             
             return results
