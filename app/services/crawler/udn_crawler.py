@@ -37,7 +37,7 @@ class UDNCrawler(BaseCrawler):
             if not start_date or (start_date == end_date == datetime.now().strftime("%Y-%m-%d")):
                 max_pages = 1
             else:
-                max_pages = 50
+                max_pages = 5
             
             logger.info(f"開始爬取，最大頁數限制: {max_pages} 頁")
             

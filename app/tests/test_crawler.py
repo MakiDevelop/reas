@@ -46,53 +46,69 @@ async def test_crawler(crawler_type="ltn", start_date=None, end_date=None):
 
 		logger.info(f"開始爬取 {crawler_type} 文章 (日期範圍: {start_date} ~ {end_date})...")
 		
-		# 根據不同爬蟲使用對應的方法
-		if crawler_type.lower() == "ltn":
-			articles = await crawler.run(max_pages=1, start_date=start_date, end_date=end_date)
-		elif crawler_type.lower() == "udn":
-			articles = await crawler.crawl(start_date=start_date, end_date=end_date)
-		else:  # nextapple
-			articles = crawler.crawl(start_date=start_date, end_date=end_date)  # 不需要 await
+		# 初始化 driver (如果爬蟲需要的話)
+		if hasattr(crawler, 'setup_driver'):
+			crawler.setup_driver()
 		
-		if articles:
-			logger.info(f"成功爬取 {len(articles)} 篇文章")
+		try:
+			# 根據不同爬蟲使用對應的方法
+			if crawler_type.lower() == "ltn":
+				articles = await crawler.run(max_pages=1, start_date=start_date, end_date=end_date)
+			elif crawler_type.lower() == "udn":
+				articles = await crawler.crawl(start_date=start_date, end_date=end_date)
+			elif crawler_type.lower() == "nextapple":
+				articles = crawler.crawl(start_date=start_date, end_date=end_date)
 			
-			# 儲存到資料庫
+			logger.info(f"爬取到 {len(articles)} 篇文章")
+			
+			# 存入資料庫
+			saved_count = 0
+			updated_count = 0
 			db = SessionLocal()
 			try:
-				new_count = 0
-				update_count = 0
 				for article in articles:
-					# 檢查文章是否已存在
-					existing = db.query(Article).filter(Article.url == (article.url if isinstance(article, Article) else article["url"])).first()
-					
-					if existing:
-						# 更新現有文章
-						if isinstance(article, Article):
-							for key, value in article.__dict__.items():
-								if not key.startswith('_'):
-									setattr(existing, key, value)
-						else:
-							for key, value in article.items():
-								if not key.startswith('_'):
-									setattr(existing, key, value)
-						update_count += 1
-						logger.info(f"更新文章: {article.title if isinstance(article, Article) else article['title']}")
+					# 檢查是否需要轉換成 Article 物件
+					if isinstance(article, dict):
+						article_obj = Article(
+							url=article.get('url'),
+							title=article.get('title'),
+							content=article.get('content'),
+							published_at=article.get('published_at'),
+							source=crawler_type.lower(),
+							image_url=article.get('image_url'),
+							description=article.get('description')
+						)
 					else:
-						# 新增文章
-						if isinstance(article, Article):
-							db.add(article)
-						else:
-							db.add(Article(**article))
-						new_count += 1
-						logger.info(f"新增文章: {article.title if isinstance(article, Article) else article['title']}")
-							
-				db.commit()
-				logger.info(f"資料儲存完成！新增 {new_count} 篇，更新 {update_count} 篇")
+						article_obj = article
+					
+					# 檢查文章是否已存在
+					existing = db.query(Article).filter(Article.url == article_obj.url).first()
+					if existing:
+						logger.info(f"更新文章: {article_obj.title}")
+						for key, value in article_obj.__dict__.items():
+							if key != '_sa_instance_state':
+								setattr(existing, key, value)
+						updated_count += 1
+					else:
+						logger.info(f"新增文章: {article_obj.title}")
+						db.add(article_obj)
+						saved_count += 1
+					db.commit()
+				
+				logger.info(f"完成！新增: {saved_count} 篇，更新: {updated_count} 篇")
+				return len(articles)
+				
+			except Exception as e:
+				logger.error(f"資料庫操作失敗: {str(e)}")
+				db.rollback()
+				raise
 			finally:
 				db.close()
 				
-		return len(articles) if articles else 0
+		finally:
+			# 如果爬蟲有 cleanup 方法，就呼叫它
+			if hasattr(crawler, 'cleanup'):
+				crawler.cleanup()
 				
 	except Exception as e:
 		logger.error(f"爬蟲執行失敗: {str(e)}")
@@ -214,17 +230,19 @@ async def crawl_historical_data(start_date=None, end_date=None):
 
 if __name__ == '__main__':
 	parser = argparse.ArgumentParser()
-	parser.add_argument('crawler', choices=['ltn', 'udn', 'nextapple', 'historical'], 
-					   help='指定要測試的爬蟲或執行歷史回補')
+	parser.add_argument('crawler', choices=['ltn', 'udn', 'nextapple'], 
+					   help='指定要測試的爬蟲')
 	parser.add_argument('--start_date', 
 					   help='回補起始日期 (YYYY-MM-DD)',
-					   default=None)
+					   default='2025-01-07')
 	parser.add_argument('--end_date',
 					   help='回補結束日期 (YYYY-MM-DD)',
-					   default=None)
+					   default='2025-01-07')
+	parser.add_argument('--debug', action='store_true',
+					   help='開啟除錯模式')
 	args = parser.parse_args()
 	
-	if args.crawler == 'historical':
-		asyncio.run(crawl_historical_data(args.start_date, args.end_date))
-	else:
-		asyncio.run(test_crawler(args.crawler, args.start_date, args.end_date))
+	if args.debug:
+		logging.getLogger().setLevel(logging.DEBUG)
+		
+	asyncio.run(test_crawler(args.crawler, args.start_date, args.end_date))

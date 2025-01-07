@@ -27,10 +27,10 @@ class NextAppleCrawler:
         
         all_articles = []
         page = 1
-        max_pages = 50  # 增加頁數以確保能爬到足夠的歷史文章
-        reached_start_date = False
+        max_pages = 50
+        should_stop = False
         
-        while page <= max_pages and not reached_start_date:
+        while page <= max_pages and not should_stop:
             articles = self.get_news_list(page)
             
             if not articles:
@@ -38,51 +38,26 @@ class NextAppleCrawler:
                 break
                 
             # 檢查文章日期範圍
-            filtered_articles = []
+            has_valid_article = False
+            
             for article in articles:
-                # 如果文章日期早於起始日期，停止爬取
-                if start_datetime and article.published_at < start_datetime:
-                    reached_start_date = True
+                # 檢查文章日期是否在範圍內
+                if (not start_datetime or article.published_at.date() >= start_datetime.date()) and \
+                   (not end_datetime or article.published_at.date() <= end_datetime.date()):
+                    has_valid_article = True
+                    all_articles.append(article)
+                    logging.info(f"找到符合日期的文章: {article.title}")
+                elif start_datetime and article.published_at.date() < start_datetime.date():
+                    should_stop = True
                     break
-                    
-                # 如果文章日期在範圍內，加入列表
-                if (not start_datetime or article.published_at >= start_datetime) and \
-                   (not end_datetime or article.published_at <= end_datetime):
-                    filtered_articles.append(article)
             
-            all_articles.extend(filtered_articles)
-            
-            if reached_start_date:
+            if not has_valid_article or should_stop:
                 logging.info(f"已達到目標起始日期 {start_date}，停止爬取")
                 break
                 
             page += 1
-            
-        # 將文章存入資料庫
-        if all_articles:
-            db = SessionLocal()
-            try:
-                new_count = 0
-                for article in all_articles:
-                    # 檢查文章是否已存在
-                    existing = db.query(Article).filter(Article.url == article.url).first()
-                    if existing:
-                        logging.info(f"文章已存在: {article.title}")
-                        continue
-                        
-                    logging.info(f"新增文章: {article.title}")
-                    db.add(article)
-                    new_count += 1
-                
-                db.commit()
-                logging.info(f"成功儲存 {new_count} 篇新文章")
-                
-            except Exception as e:
-                logging.error(f"儲存文章時發生錯誤: {str(e)}")
-                db.rollback()
-            finally:
-                db.close()
-                
+        
+        logging.info(f"共爬取到 {len(all_articles)} 篇符合日期範圍的文章")
         return all_articles
 
     def get_article_content(self, url: str) -> str:

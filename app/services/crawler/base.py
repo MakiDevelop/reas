@@ -50,7 +50,11 @@ class BaseCrawler(ABC):
                 self.driver.quit()
                 logger.info(f"{self.source_name} crawler cleanup completed")
             except Exception as e:
-                logger.error(f"Error during cleanup: {str(e)}", exc_info=True)
+                # 忽略關閉時的連接錯誤
+                if "Connection refused" not in str(e):
+                    logger.error(f"Error during cleanup: {str(e)}", exc_info=True)
+            finally:
+                self.driver = None
     
     def wait_and_get(self, url: str, retry_count: int = 3):
         """安全的頁面載入方法"""
@@ -91,55 +95,51 @@ class BaseCrawler(ABC):
         """爬取單篇文章"""
         pass
     
-    async def run(self, max_pages: int = 1, start_date: str = None, end_date: str = None):
+    async def run(self, max_pages=None, start_date=None, end_date=None):
         """執行爬蟲"""
         try:
             self.setup_driver()
             articles = []
-            start_datetime, end_datetime = self.parse_date_range(start_date, end_date)
+            page = 1
             
-            for page in range(1, max_pages + 1):
-                try:
-                    page_articles = await self.crawl_list(page)
+            while True:
+                # 爬取當前頁面的文章列表
+                page_articles = await self.crawl_list(page)
+                if not page_articles:
+                    break
                     
-                    # 檢查是否已經超出日期範圍
-                    if start_datetime:
-                        oldest_article = min(
-                            (a for a in page_articles if a.get('published_at')),
-                            key=lambda x: x.get('published_at'),
-                            default=None
-                        )
-                        if oldest_article and oldest_article.get('published_at') < start_datetime:
-                            logger.info(f"已達到目標起始日期 {start_date}，停止爬取")
-                            break
-                    
-                    articles.extend(page_articles)
-                    logger.info(f"Crawled page {page}, got {len(page_articles)} articles")
-                    time.sleep(1)
-                except Exception as e:
-                    logger.error(f"Error crawling page {page}: {str(e)}", exc_info=True)
-                    continue
-            
-            results = []
-            for article_info in articles:
-                try:
-                    # 檢查文章日期是否在範圍內
-                    if not self.is_within_date_range(
-                        article_info.get('published_at'),
-                        start_datetime,
-                        end_datetime
-                    ):
+                # 檢查日期範圍
+                has_valid_article = False
+                for article_info in page_articles:
+                    published_at = article_info.get('published_at')
+                    if not published_at:
                         continue
                         
-                    article_data = await self.crawl_article(article_info)
-                    if article_data:
-                        results.append(article_data)
-                        logger.info(f"Crawled article: {article_data.get('title', 'Unknown')}")
-                    time.sleep(1)
-                except Exception as e:
-                    logger.error(f"Error crawling article {article_info}: {str(e)}", exc_info=True)
-                    continue
+                    article_date = published_at.date()
+                    
+                    # 如果文章日期在目標範圍內，爬取詳細內容
+                    if start_date and article_date < datetime.strptime(start_date, '%Y-%m-%d').date():
+                        continue
+                    if end_date and article_date > datetime.strptime(end_date, '%Y-%m-%d').date():
+                        continue
+                        
+                    has_valid_article = True
+                    article = await self.crawl_article(article_info)
+                    if article:
+                        articles.append(article)
+                
+                # 如果這頁沒有任何符合日期的文章，就停止爬取
+                if not has_valid_article:
+                    logger.info("本頁沒有符合日期範圍的文章，停止爬取")
+                    break
+                    
+                # 檢查是否達到最大頁數
+                if max_pages and page >= max_pages:
+                    break
+                    
+                page += 1
+                
+            return articles
             
-            return results
         finally:
-            self.cleanup() 
+            self.cleanup()
