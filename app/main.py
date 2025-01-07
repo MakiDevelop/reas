@@ -1,4 +1,4 @@
-from fastapi import FastAPI, Request, Depends, HTTPException
+from fastapi import FastAPI, Request, Depends, HTTPException, BackgroundTasks
 from fastapi.templating import Jinja2Templates
 from fastapi.staticfiles import StaticFiles
 from app.core.database import engine, Base, get_db
@@ -9,6 +9,11 @@ from sqlalchemy import text, desc, or_
 from app.core.config import settings
 from math import ceil
 from sqlalchemy.orm import Session
+from datetime import datetime, timedelta
+import subprocess
+from fastapi.responses import RedirectResponse
+from apscheduler.schedulers.asyncio import AsyncIOScheduler
+from apscheduler.triggers.cron import CronTrigger
 
 # 設定日誌
 logging.basicConfig(level=logging.INFO)
@@ -28,6 +33,75 @@ app.mount("/static", StaticFiles(directory="app/static"), name="static")
 # 註冊 API 路由
 app.include_router(api_router, prefix=settings.API_V1_STR)
 
+# 建立排程器
+scheduler = AsyncIOScheduler()
+
+async def run_crawler_in_background(crawler_type: str = "all", start_date: str = None, end_date: str = None):
+    """在背景執行爬蟲"""
+    try:
+        # 如果沒有指定日期，使用今天
+        if not start_date or not end_date:
+            start_date = end_date = datetime.now().strftime("%Y-%m-%d")
+            
+        # 定義要爬取的新聞來源
+        sources = ["udn", "ltn", "nextapple"] if crawler_type == "all" else [crawler_type]
+        
+        for source in sources:
+            try:
+                # 執行爬蟲指令
+                subprocess.run([
+                    "python", 
+                    "-m", 
+                    "app.tests.test_crawler",
+                    source,
+                    "--start_date", 
+                    start_date,
+                    "--end_date",
+                    end_date
+                ], check=True)
+                logger.info(f"{source} 爬蟲完成: {datetime.now()}")
+            except subprocess.CalledProcessError as e:
+                logger.error(f"{source} 爬蟲執行失敗: {str(e)}")
+                
+    except Exception as e:
+        logger.error(f"爬蟲執行失敗: {str(e)}")
+
+async def crawl_today():
+    """排程爬蟲任務"""
+    background_tasks = BackgroundTasks()
+    background_tasks.add_task(run_crawler_in_background)
+    await background_tasks()
+
+# 設定排程任務
+def setup_scheduler():
+    # 每天 8:00 執行
+    scheduler.add_job(
+        crawl_today,
+        CronTrigger(hour=8, minute=0)
+    )
+    
+    # 每天 12:00 執行
+    scheduler.add_job(
+        crawl_today,
+        CronTrigger(hour=12, minute=0)
+    )
+    
+    # 每天 16:00 執行
+    scheduler.add_job(
+        crawl_today,
+        CronTrigger(hour=16, minute=0)
+    )
+    
+    # 每天 20:00 執行
+    scheduler.add_job(
+        crawl_today,
+        CronTrigger(hour=20, minute=0)
+    )
+    
+    # 啟動排程器
+    scheduler.start()
+    logger.info("排程器已啟動")
+
 # 前台頁面路由
 @app.get("/", name="index")
 async def index(
@@ -38,6 +112,7 @@ async def index(
     start_date: str = None,
     end_date: str = None,
     keyword: str = None,
+    error: str = None,
     db: Session = Depends(get_db)
 ):
     # 設定每頁顯示數量
@@ -97,7 +172,8 @@ async def index(
             "keyword": keyword,
             "source": source,
             "sources": sources,
-            "params": params
+            "params": params,
+            "error": error
         }
     )
 
@@ -145,6 +221,14 @@ async def startup_event():
         logger.error(f"資料庫連接失敗：{str(e)}")
         raise e
 
+    setup_scheduler()
+
+# 在應用程式關閉時關閉排程器
+@app.on_event("shutdown")
+async def shutdown_event():
+    scheduler.shutdown()
+    logger.info("排程器已關閉")
+
 @app.get("/health")
 def health_check():
     """
@@ -163,3 +247,34 @@ def health_check():
             "status": "unhealthy",
             "database": str(e)
         }
+
+@app.get("/crawl/latest", name="crawl_latest")
+async def crawl_latest(background_tasks: BackgroundTasks):
+    """爬取最新一天的新聞"""
+    try:
+        # 在背景執行所有爬蟲
+        background_tasks.add_task(run_crawler_in_background)
+        return RedirectResponse(url="/?message=crawl_started", status_code=303)
+    except Exception as e:
+        logger.error(f"爬蟲執行失敗: {str(e)}")
+        return RedirectResponse(url="/?error=crawl_failed", status_code=303)
+
+@app.get("/crawl/last-week", name="crawl_last_week")
+async def crawl_last_week(background_tasks: BackgroundTasks):
+    """爬取最近七天的新聞"""
+    try:
+        # 計算日期範圍
+        end_date = datetime.now().strftime("%Y-%m-%d")
+        start_date = (datetime.now() - timedelta(days=7)).strftime("%Y-%m-%d")
+        
+        # 在背景執行所有爬蟲
+        background_tasks.add_task(
+            run_crawler_in_background,
+            start_date=start_date,
+            end_date=end_date
+        )
+        
+        return RedirectResponse(url="/?message=crawl_started", status_code=303)
+    except Exception as e:
+        logger.error(f"爬蟲執行失敗: {str(e)}")
+        return RedirectResponse(url="/?error=crawl_failed", status_code=303)

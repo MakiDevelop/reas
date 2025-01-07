@@ -26,12 +26,20 @@ class UDNCrawler(BaseCrawler):
         """
         return await self._crawl(start_date=start_date, end_date=end_date)
         
-    async def _crawl(self, start_date: str = None, end_date: str = None, max_pages: int = 50) -> list:
+    async def _crawl(self, start_date: str = None, end_date: str = None) -> list:
         """非同步爬取主邏輯"""
         try:
             self.setup_driver()
             articles = []
             page = 1
+            
+            # 如果沒有指定日期，或者日期範圍是今天，則限制為10頁
+            if not start_date or (start_date == end_date == datetime.now().strftime("%Y-%m-%d")):
+                max_pages = 3
+            else:
+                max_pages = 50
+            
+            logger.info(f"開始爬取，最大頁數限制: {max_pages} 頁")
             
             while page <= max_pages:
                 logger.info(f"開始爬取第 {page} 頁的文章列表")
