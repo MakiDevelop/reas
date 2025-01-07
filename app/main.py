@@ -29,12 +29,15 @@ app.mount("/static", StaticFiles(directory="app/static"), name="static")
 app.include_router(api_router, prefix=settings.API_V1_STR)
 
 # 前台頁面路由
-@app.get("/")
+@app.get("/", name="index")
 async def index(
     request: Request, 
     page: int = 1,
-    keyword: str = None,
     source: str = None,
+    category: str = None,
+    start_date: str = None,
+    end_date: str = None,
+    keyword: str = None,
     db: Session = Depends(get_db)
 ):
     # 設定每頁顯示數量
@@ -70,6 +73,19 @@ async def index(
     sources = db.query(Article.source).distinct().all()
     sources = [source[0] for source in sources]
     
+    # 建立查詢參數字典
+    params = {}
+    if source:
+        params['source'] = source
+    if category:
+        params['category'] = category
+    if start_date:
+        params['start_date'] = start_date
+    if end_date:
+        params['end_date'] = end_date
+    if keyword:
+        params['keyword'] = keyword
+
     return templates.TemplateResponse(
         "index.html",
         {
@@ -80,7 +96,8 @@ async def index(
             "total": total,
             "keyword": keyword,
             "source": source,
-            "sources": sources
+            "sources": sources,
+            "params": params
         }
     )
 

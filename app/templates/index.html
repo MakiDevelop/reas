@@ -120,24 +120,43 @@
         </div>
 
         {% if total_pages > 1 %}
-        <nav aria-label="Page navigation" class="my-4">
+        <nav aria-label="Page navigation" class="mt-4">
             <ul class="pagination justify-content-center">
+                <!-- 第一頁 -->
                 <li class="page-item {% if current_page == 1 %}disabled{% endif %}">
-                    <a class="page-link" href="?page={{ current_page - 1 }}" tabindex="-1">上一頁</a>
+                    <a class="page-link" href="/?page=1{% for key, value in params.items() %}&{{ key }}={{ value }}{% endfor %}" aria-label="First">
+                        <span aria-hidden="true">第一頁</span>
+                    </a>
                 </li>
                 
-                {# 計算要顯示的頁碼範圍 #}
-                {% set start_page = current_page - 2 if current_page - 2 > 0 else 1 %}
-                {% set end_page = current_page + 2 if current_page + 2 < total_pages else total_pages %}
+                <!-- 上一頁 -->
+                <li class="page-item {% if current_page == 1 %}disabled{% endif %}">
+                    <a class="page-link" href="/?page={{ current_page-1 }}{% for key, value in params.items() %}&{{ key }}={{ value }}{% endfor %}" aria-label="Previous">
+                        <span aria-hidden="true">上一頁</span>
+                    </a>
+                </li>
                 
-                {% for p in range(start_page, end_page + 1) %}
-                <li class="page-item {% if p == current_page %}active{% endif %}">
-                    <a class="page-link" href="?page={{ p }}">{{ p }}</a>
+                <!-- 頁碼 -->
+                {% set start_page = [1, current_page-2] | max %}
+                {% set end_page = [total_pages+1, current_page+3] | min %}
+                {% for page in range(start_page, end_page) %}
+                <li class="page-item {% if page == current_page %}active{% endif %}">
+                    <a class="page-link" href="/?page={{ page }}{% for key, value in params.items() %}&{{ key }}={{ value }}{% endfor %}">{{ page }}</a>
                 </li>
                 {% endfor %}
                 
+                <!-- 下一頁 -->
                 <li class="page-item {% if current_page == total_pages %}disabled{% endif %}">
-                    <a class="page-link" href="?page={{ current_page + 1 }}">下一頁</a>
+                    <a class="page-link" href="/?page={{ current_page+1 }}{% for key, value in params.items() %}&{{ key }}={{ value }}{% endfor %}" aria-label="Next">
+                        <span aria-hidden="true">下一頁</span>
+                    </a>
+                </li>
+                
+                <!-- 最後一頁 -->
+                <li class="page-item {% if current_page == total_pages %}disabled{% endif %}">
+                    <a class="page-link" href="/?page={{ total_pages }}{% for key, value in params.items() %}&{{ key }}={{ value }}{% endfor %}" aria-label="Last">
+                        <span aria-hidden="true">最後一頁</span>
+                    </a>
                 </li>
             </ul>
         </nav>

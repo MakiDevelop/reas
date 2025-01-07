@@ -55,8 +55,16 @@
                  onerror="this.onerror=null; this.src='/static/default-news.jpg';">
             {% endif %}
 
-            <div class="article-content mb-4">
-                {{ article.content | replace('\n', '<br>') | safe }}
+            <div class="article-content">
+                {% if article.content %}
+                    {% for paragraph in article.content.split('。') %}
+                        {% if paragraph.strip() %}
+                            <p>{{ paragraph.strip() }}。</p>
+                        {% endif %}
+                    {% endfor %}
+                {% else %}
+                    <p>無內容</p>
+                {% endif %}
             </div>
 
             <div class="text-center">
