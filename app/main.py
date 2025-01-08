@@ -11,13 +11,14 @@ from math import ceil
 from sqlalchemy.orm import Session
 from datetime import datetime, timedelta
 import subprocess
-from fastapi.responses import RedirectResponse
+from fastapi.responses import RedirectResponse, JSONResponse
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from apscheduler.triggers.cron import CronTrigger
 from typing import Optional
 import asyncio
 from app.tests.test_crawler import test_crawler
 import multiprocessing
+from pytz import timezone
 
 # 設定日誌
 logging.basicConfig(level=logging.INFO)
@@ -38,7 +39,7 @@ app.mount("/static", StaticFiles(directory="app/static"), name="static")
 app.include_router(api_router, prefix=settings.API_V1_STR)
 
 # 建立排程器
-scheduler = AsyncIOScheduler()
+scheduler = AsyncIOScheduler(timezone=timezone('Asia/Taipei'))
 
 async def run_crawler_in_background(crawler_type: str = "all", start_date: str = None, end_date: str = None):
     """在背景執行爬蟲"""
@@ -72,39 +73,67 @@ async def run_crawler_in_background(crawler_type: str = "all", start_date: str =
 
 async def crawl_today():
     """排程爬蟲任務"""
-    background_tasks = BackgroundTasks()
-    background_tasks.add_task(run_crawler_in_background)
-    await background_tasks()
+    logger.info(f"開始執行排程爬蟲任務: {datetime.now()}")
+    try:
+        # 取得今天日期
+        today = datetime.now().strftime("%Y-%m-%d")
+        
+        # 建立新的 Process 來執行爬蟲
+        process = multiprocessing.Process(
+            target=run_crawler_process,
+            args=(today, today)
+        )
+        process.start()
+        
+        logger.info(f"排程爬蟲任務已啟動: {datetime.now()}")
+        
+    except Exception as e:
+        logger.error(f"排程爬蟲任務失敗: {str(e)}")
 
 # 設定排程任務
 def setup_scheduler():
-    # 每天 8:00 執行
-    scheduler.add_job(
-        crawl_today,
-        CronTrigger(hour=8, minute=0)
-    )
-    
-    # 每天 12:00 執行
-    scheduler.add_job(
-        crawl_today,
-        CronTrigger(hour=12, minute=0)
-    )
-    
-    # 每天 16:00 執行
-    scheduler.add_job(
-        crawl_today,
-        CronTrigger(hour=16, minute=0)
-    )
-    
-    # 每天 20:00 執行
-    scheduler.add_job(
-        crawl_today,
-        CronTrigger(hour=20, minute=0)
-    )
-    
-    # 啟動排程器
-    scheduler.start()
-    logger.info("排程器已啟動")
+    try:
+        # 每天 8:00 執行 (台灣時間)
+        scheduler.add_job(
+            crawl_today,
+            CronTrigger(hour=8, minute=0, timezone=timezone('Asia/Taipei')),
+            id='crawl_8am',
+            replace_existing=True
+        )
+        
+        # 每天 12:00 執行 (台灣時間)
+        scheduler.add_job(
+            crawl_today,
+            CronTrigger(hour=12, minute=0, timezone=timezone('Asia/Taipei')),
+            id='crawl_12pm',
+            replace_existing=True
+        )
+        
+        # 每天 16:00 執行 (台灣時間)
+        scheduler.add_job(
+            crawl_today,
+            CronTrigger(hour=16, minute=0, timezone=timezone('Asia/Taipei')),
+            id='crawl_4pm',
+            replace_existing=True
+        )
+        
+        # 每天 20:00 執行 (台灣時間)
+        scheduler.add_job(
+            crawl_today,
+            CronTrigger(hour=20, minute=0, timezone=timezone('Asia/Taipei')),
+            id='crawl_8pm',
+            replace_existing=True
+        )
+        
+        # �動排程器
+        scheduler.start()
+        logger.info(f"排程器已啟動: {datetime.now(timezone('Asia/Taipei'))}")
+        logger.info("已設定的排程任務:")
+        for job in scheduler.get_jobs():
+            logger.info(f"- {job.id}: 下次執行時間 {job.next_run_time}")
+            
+    except Exception as e:
+        logger.error(f"設定排程器時發生錯誤: {str(e)}")
 
 # 前台頁面路由
 @app.get("/", name="index")
@@ -332,4 +361,48 @@ async def crawl_articles(
         raise HTTPException(
             status_code=500,
             detail=str(e)
+        )
+
+@app.get("/scheduler/status")
+async def check_scheduler_status():
+    """檢查排程器狀態"""
+    try:
+        taipei_tz = timezone('Asia/Taipei')
+        current_time = datetime.now(taipei_tz)
+        
+        jobs = []
+        for job in scheduler.get_jobs():
+            jobs.append({
+                "id": job.id,
+                "next_run_time": str(job.next_run_time.astimezone(taipei_tz)),
+                "trigger": str(job.trigger)
+            })
+        
+        return JSONResponse({
+            "status": "running" if scheduler.running else "stopped",
+            "jobs": jobs,
+            "current_time": str(current_time)
+        })
+    except Exception as e:
+        logger.error(f"檢查排程器狀態時發生錯誤: {str(e)}")
+        raise HTTPException(
+            status_code=500,
+            detail=f"檢查排程器狀態時發生錯誤: {str(e)}"
+        )
+
+@app.get("/scheduler/test")
+async def test_scheduler():
+    """立即執行排程任務進行測試"""
+    try:
+        logger.info("開始測試排程任務")
+        await crawl_today()
+        return JSONResponse({
+            "message": "排程任務測試已啟動，請查看日誌",
+            "time": str(datetime.now())
+        })
+    except Exception as e:
+        logger.error(f"測試排程任務時發生錯誤: {str(e)}")
+        raise HTTPException(
+            status_code=500,
+            detail=f"測試排程任務時發生錯誤: {str(e)}"
         )
