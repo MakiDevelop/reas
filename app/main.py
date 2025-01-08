@@ -11,7 +11,7 @@ from math import ceil
 from sqlalchemy.orm import Session
 from datetime import datetime, timedelta
 import subprocess
-from fastapi.responses import RedirectResponse, JSONResponse
+from fastapi.responses import RedirectResponse, JSONResponse, FileResponse, StreamingResponse
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from apscheduler.triggers.cron import CronTrigger
 from typing import Optional
@@ -19,6 +19,11 @@ import asyncio
 from app.tests.test_crawler import test_crawler
 import multiprocessing
 from pytz import timezone
+import pandas as pd
+from tempfile import NamedTemporaryFile
+import os
+import shutil
+import io
 
 # 設定日誌
 logging.basicConfig(level=logging.INFO)
@@ -125,7 +130,7 @@ def setup_scheduler():
             replace_existing=True
         )
         
-        # �動排程器
+        # 動排程器
         scheduler.start()
         logger.info(f"排程器已啟動: {datetime.now(timezone('Asia/Taipei'))}")
         logger.info("已設定的排程任務:")
@@ -405,4 +410,64 @@ async def test_scheduler():
         raise HTTPException(
             status_code=500,
             detail=f"測試排程任務時發生錯誤: {str(e)}"
+        )
+
+@app.get("/export/latest")
+async def export_latest(db: Session = Depends(get_db)):
+    """匯出最新1000筆文章為Excel"""
+    try:
+        # 查詢最新1000筆文章
+        articles = db.query(Article)\
+            .order_by(desc(Article.published_at))\
+            .limit(1000)\
+            .all()
+        
+        # 準備資料
+        data = []
+        for article in articles:
+            data.append({
+                'ID': article.id,
+                '標題': article.title,
+                '來源': article.source,
+                '網址': article.url,
+                '發布時間': article.published_at,
+                '建立時間': article.created_at,
+                '更新時間': article.updated_at,
+                '內容': article.content,
+                '描述': article.description or ''
+            })
+        
+        # 建立 DataFrame
+        df = pd.DataFrame(data)
+        
+        # 建立 BytesIO 物件
+        output = io.BytesIO()
+        
+        # 寫入 Excel
+        with pd.ExcelWriter(output, engine='openpyxl') as writer:
+            df.to_excel(writer, index=False, sheet_name='文章列表')
+        
+        # 將指針移到開頭
+        output.seek(0)
+        
+        # 建立檔案名稱
+        filename = f"articles_export_{datetime.now().strftime('%Y%m%d_%H%M%S')}.xlsx"
+        
+        # 回傳串流響應
+        headers = {
+            'Content-Disposition': f'attachment; filename="{filename}"',
+            'Content-Type': 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'
+        }
+        
+        return StreamingResponse(
+            output,
+            headers=headers,
+            media_type='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'
+        )
+            
+    except Exception as e:
+        logger.error(f"匯出Excel時發生錯誤: {str(e)}")
+        raise HTTPException(
+            status_code=500,
+            detail=f"匯出失敗: {str(e)}"
         )
