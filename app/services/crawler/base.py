@@ -11,6 +11,7 @@ import time
 from datetime import datetime
 from typing import Optional, List, Dict, Any, Tuple
 from selenium.common.exceptions import TimeoutException
+import random
 
 logger = logging.getLogger(__name__)
 
@@ -23,13 +24,29 @@ class BaseCrawler(ABC):
         """設置 Chrome Driver"""
         try:
             chrome_options = webdriver.ChromeOptions()
+            
+            # 基本設定
             chrome_options.add_argument('--headless')
             chrome_options.add_argument('--no-sandbox')
             chrome_options.add_argument('--disable-dev-shm-usage')
             chrome_options.add_argument('--disable-gpu')
             chrome_options.add_argument('--window-size=1920,1080')
             
-            # 新增：設定頁面載入超時
+            # 效能優化
+            chrome_options.add_argument('--disable-extensions')
+            chrome_options.add_argument('--disable-infobars')
+            chrome_options.add_argument('--disable-notifications')
+            chrome_options.add_argument('--disable-logging')
+            chrome_options.add_argument('--disable-software-rasterizer')
+            chrome_options.add_argument('--disable-javascript')  # 如果不需要 JS
+            chrome_options.add_argument('--blink-settings=imagesEnabled=false')  # 不載入圖片
+            
+            # 記憶體優化
+            chrome_options.add_argument('--disable-features=site-per-process')
+            chrome_options.add_argument('--disable-features=TranslateUI')
+            chrome_options.add_argument('--disable-features=BlinkGenPropertyTrees')
+            
+            # 設定頁面載入策略
             chrome_options.set_capability('pageLoadStrategy', 'none')
             
             # 記錄設定
@@ -54,8 +71,8 @@ class BaseCrawler(ABC):
             )
             
             # 設定較短的超時時間
-            self.driver.set_page_load_timeout(30)
-            self.driver.set_script_timeout(30)
+            self.driver.set_page_load_timeout(20)  # 縮短到 20 秒
+            self.driver.set_script_timeout(20)
             
             logger.info(f"{self.source_name} crawler driver setup completed")
             
@@ -80,21 +97,34 @@ class BaseCrawler(ABC):
         """等待頁面載入完成"""
         for attempt in range(max_retries):
             try:
+                # 加入隨機延遲
+                time.sleep(random.uniform(1, 3))
+                
                 self.driver.get(url)
-                # 等待頁面主要元素載入
-                WebDriverWait(self.driver, 10).until(
+                
+                # 等待頁面主要元素載入，縮短等待時間
+                WebDriverWait(self.driver, 5).until(
                     lambda d: d.execute_script('return document.readyState') == 'complete'
                 )
                 return
+                
             except TimeoutException:
                 logger.warning(f"Timeout on attempt {attempt + 1} for URL: {url}")
+                # 重試前清除快取
+                self.driver.execute_script("window.localStorage.clear();")
+                self.driver.execute_script("window.sessionStorage.clear();")
+                self.driver.delete_all_cookies()
+                
                 if attempt == max_retries - 1:
                     raise
                 continue
+                
             except Exception as e:
                 logger.error(f"Error loading page {url}: {str(e)}")
                 if attempt == max_retries - 1:
                     raise
+                # 重試前暫停較長時間
+                time.sleep(random.uniform(2, 5))
                 continue
     
     def parse_date_range(self, start_date: Optional[str], end_date: Optional[str]) -> Tuple[Optional[datetime], Optional[datetime]]:
@@ -131,6 +161,9 @@ class BaseCrawler(ABC):
             page = 1
             
             while True:
+                # 在請求之間加入隨機延遲
+                time.sleep(random.uniform(1, 3))
+                
                 # 爬取當前頁面的文章列表
                 page_articles = await self.crawl_list(page)
                 if not page_articles:
