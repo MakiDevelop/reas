@@ -186,7 +186,8 @@
             // 顯示提示訊息
             const alertHtml = `
                 <div class="alert alert-info alert-dismissible fade show mt-3" role="alert">
-                    爬蟲執行中，請稍候...
+                    爬蟲已在背景開始執行，您可以繼續瀏覽網站。
+                    幾分鐘後重新整理頁面即可看到最新文章。
                     <button type="button" class="btn-close" data-bs-dismiss="alert" aria-label="Close"></button>
                 </div>
             `;
@@ -195,47 +196,20 @@
             // 取得今天日期
             const today = new Date().toISOString().split('T')[0];
             
-            // 呼叫爬蟲 API (改用 POST 方法)
+            // 呼叫爬蟲 API
             const response = await fetch(`/api/crawl?start_date=${today}&end_date=${today}`, {
                 method: 'POST'
             });
             
             const data = await response.json();
             
-            // 移除原有的提示訊息
-            document.querySelector('.alert-info')?.remove();
-            
-            // 顯示結果
-            let resultMessage = `
-                <div class="alert alert-${data.status === 'success' ? 'success' : 'danger'} alert-dismissible fade show mt-3" role="alert">
-                    <h5>爬蟲執行結果：</h5>
-                    <ul>
-            `;
-            
-            data.results.forEach(result => {
-                resultMessage += `
-                    <li>${result.source}: ${result.message}</li>
-                `;
-            });
-            
-            resultMessage += `
-                    </ul>
-                    <button type="button" class="btn-close" data-bs-dismiss="alert" aria-label="Close"></button>
-                </div>
-            `;
-            
-            document.querySelector('.container').insertAdjacentHTML('beforeend', resultMessage);
-            
-            // 3秒後重新載入頁面
-            setTimeout(() => {
-                window.location.reload();
-            }, 3000);
+            // 不自動重新載入頁面，讓使用者可以繼續瀏覽
             
         } catch (error) {
             console.error('Error:', error);
             const errorHtml = `
                 <div class="alert alert-danger alert-dismissible fade show mt-3" role="alert">
-                    爬蟲執行失敗：${error.message}
+                    爬蟲啟動失敗：${error.message}
                     <button type="button" class="btn-close" data-bs-dismiss="alert" aria-label="Close"></button>
                 </div>
             `;

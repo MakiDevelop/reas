@@ -10,6 +10,7 @@ import logging
 import time
 from datetime import datetime
 from typing import Optional, List, Dict, Any, Tuple
+from selenium.common.exceptions import TimeoutException
 
 logger = logging.getLogger(__name__)
 
@@ -19,28 +20,47 @@ class BaseCrawler(ABC):
         self.source_name = ""
     
     def setup_driver(self):
-        """設定 Selenium WebDriver"""
+        """設置 Chrome Driver"""
         try:
-            chrome_options = Options()
+            chrome_options = webdriver.ChromeOptions()
             chrome_options.add_argument('--headless')
             chrome_options.add_argument('--no-sandbox')
             chrome_options.add_argument('--disable-dev-shm-usage')
             chrome_options.add_argument('--disable-gpu')
             chrome_options.add_argument('--window-size=1920,1080')
-            chrome_options.binary_location = settings.CHROME_BIN
             
-            service = Service(executable_path=settings.CHROMEDRIVER_PATH)
+            # 新增：設定頁面載入超時
+            chrome_options.set_capability('pageLoadStrategy', 'none')
             
+            # 記錄設定
             logger.info(f"Setting up Chrome driver with options: {chrome_options.arguments}")
-            logger.info(f"Chrome binary location: {settings.CHROME_BIN}")
-            logger.info(f"ChromeDriver path: {settings.CHROMEDRIVER_PATH}")
             
-            self.driver = webdriver.Chrome(service=service, options=chrome_options)
-            self.driver.implicitly_wait(10)
+            # 設定 Chrome 二進制檔案位置
+            chrome_binary_location = "/usr/bin/chromium"
+            chrome_options.binary_location = chrome_binary_location
+            logger.info(f"Chrome binary location: {chrome_binary_location}")
+            
+            # 設定 ChromeDriver 路徑
+            chromedriver_path = "/usr/bin/chromedriver"
+            logger.info(f"ChromeDriver path: {chromedriver_path}")
+            
+            # 建立 Service 物件
+            service = Service(executable_path=chromedriver_path)
+            
+            # 建立 WebDriver
+            self.driver = webdriver.Chrome(
+                service=service,
+                options=chrome_options
+            )
+            
+            # 設定較短的超時時間
+            self.driver.set_page_load_timeout(30)
+            self.driver.set_script_timeout(30)
+            
             logger.info(f"{self.source_name} crawler driver setup completed")
             
         except Exception as e:
-            logger.error(f"Failed to setup driver: {str(e)}", exc_info=True)
+            logger.error(f"Error setting up Chrome driver: {str(e)}", exc_info=True)
             raise
     
     def cleanup(self):
@@ -56,18 +76,26 @@ class BaseCrawler(ABC):
             finally:
                 self.driver = None
     
-    def wait_and_get(self, url: str, retry_count: int = 3):
-        """安全的頁面載入方法"""
-        for i in range(retry_count):
+    def wait_and_get(self, url: str, max_retries: int = 3) -> None:
+        """等待頁面載入完成"""
+        for attempt in range(max_retries):
             try:
                 self.driver.get(url)
-                time.sleep(2)
-                return True
-            except Exception as e:
-                logger.error(f"Attempt {i+1} failed to load {url}: {str(e)}")
-                if i == retry_count - 1:
+                # 等待頁面主要元素載入
+                WebDriverWait(self.driver, 10).until(
+                    lambda d: d.execute_script('return document.readyState') == 'complete'
+                )
+                return
+            except TimeoutException:
+                logger.warning(f"Timeout on attempt {attempt + 1} for URL: {url}")
+                if attempt == max_retries - 1:
                     raise
-                time.sleep(2)
+                continue
+            except Exception as e:
+                logger.error(f"Error loading page {url}: {str(e)}")
+                if attempt == max_retries - 1:
+                    raise
+                continue
     
     def parse_date_range(self, start_date: Optional[str], end_date: Optional[str]) -> Tuple[Optional[datetime], Optional[datetime]]:
         """解析日期範圍"""
