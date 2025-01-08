@@ -54,7 +54,7 @@ async def run_crawler_in_background(crawler_type: str = "all", start_date: str =
             start_date = end_date = datetime.now().strftime("%Y-%m-%d")
             
         # 定義要爬取的新聞來源
-        sources = ["udn", "ltn", "nextapple"] if crawler_type == "all" else [crawler_type]
+        sources = ["udn", "ltn", "nextapple", "ettoday"] if crawler_type == "all" else [crawler_type]
         
         for source in sources:
             try:
@@ -321,7 +321,7 @@ async def crawl_last_week(background_tasks: BackgroundTasks):
 def run_crawler_process(start_date, end_date):
     """在新的 Process 中執行爬蟲"""
     async def run():
-        for source in ["ltn", "udn", "nextapple"]:
+        for source in ["ltn", "udn", "nextapple", "ettoday"]:
             try:
                 logger.info(f"開始爬取 {source} 文章...")
                 count = await test_crawler(
@@ -358,7 +358,7 @@ async def crawl_articles(
                 "source": source,
                 "status": "started",
                 "message": "開始執行爬蟲"
-            } for source in ["ltn", "udn", "nextapple"]]
+            } for source in ["ltn", "udn", "nextapple", "ettoday"]]
         }
         
     except Exception as e:
