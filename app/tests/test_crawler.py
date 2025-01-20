@@ -4,6 +4,7 @@ from app.services.crawler.ltn_crawler import LTNCrawler
 from app.services.crawler.udn_crawler import UDNCrawler
 from app.services.crawler.nextapple_crawler import NextAppleCrawler
 from app.services.crawler.ettoday_crawler import EttodayCrawler
+# from app.services.crawler.ebc_crawler import EbcCrawler  # 暫時註解掉
 from app.services.crawler.base import BaseCrawler
 from app.core.database import SessionLocal
 from app.models.article import Article
@@ -33,7 +34,8 @@ def get_crawler(crawler_name: str):
 		'ltn': LTNCrawler(),
 		'udn': UDNCrawler(),
 		'nextapple': NextAppleCrawler(),
-		'ettoday': EttodayCrawler()
+		'ettoday': EttodayCrawler(),
+		# 'ebc': EbcCrawler()  # 暫時註解掉
 	}
 	return crawlers.get(crawler_name)
 
@@ -59,8 +61,10 @@ async def test_crawler(crawler_type="ltn", start_date=None, end_date=None):
 			elif crawler_type.lower() == "udn":
 				articles = await crawler.crawl(start_date=start_date, end_date=end_date)
 			elif crawler_type.lower() == "nextapple":
-				articles = crawler.crawl(start_date=start_date, end_date=end_date)
+				articles = await crawler.crawl(start_date=start_date, end_date=end_date)
 			elif crawler_type.lower() == "ettoday":
+				articles = await crawler.crawl(start_date=start_date, end_date=end_date)
+			elif crawler_type.lower() == "ebc":
 				articles = await crawler.crawl(start_date=start_date, end_date=end_date)
 			
 			logger.info(f"爬取到 {len(articles)} 篇文章")
@@ -221,7 +225,7 @@ async def crawl_historical_data(start_date=None, end_date=None):
 	
 	try:
 		# 依序執行爬蟲
-		for crawler_name in ['ltn', 'udn', 'nextapple', 'ettoday']:
+		for crawler_name in ['ltn', 'udn', 'nextapple', 'ettoday', 'ebc']:
 			logging.info(f"開始執行 {crawler_name.upper()} 爬蟲...")
 			count = await test_crawler(crawler_name, start_date, end_date)
 			logging.info(f"{crawler_name.upper()} 爬蟲完成，共取得 {count} 篇文章")
