@@ -1,11 +1,11 @@
-from fastapi import FastAPI, Request, Depends, HTTPException, BackgroundTasks
+from fastapi import FastAPI, Request, Depends, HTTPException, BackgroundTasks, APIRouter, Form
 from fastapi.templating import Jinja2Templates
 from fastapi.staticfiles import StaticFiles
 from app.core.database import engine, Base, get_db
 from app.api.v1.api import api_router
 from app.models.article import Article
 import logging
-from sqlalchemy import text, desc, or_
+from sqlalchemy import text, desc, or_, select
 from app.core.config import settings
 from math import ceil
 from sqlalchemy.orm import Session
@@ -24,6 +24,11 @@ from tempfile import NamedTemporaryFile
 import os
 import shutil
 import io
+import csv
+from app.services.crawler.ltn_crawler import LTNCrawler
+from app.services.crawler.udn_crawler import UDNCrawler
+from app.services.crawler.nextapple_crawler import NextAppleCrawler
+from app.services.crawler.ettoday_crawler import EttodayCrawler
 
 # 設定日誌
 logging.basicConfig(level=logging.INFO)
@@ -471,3 +476,153 @@ async def export_latest(db: Session = Depends(get_db)):
             status_code=500,
             detail=f"匯出失敗: {str(e)}"
         )
+
+@app.get("/export")
+async def export_page(request: Request):
+    """匯出資料頁面"""
+    return templates.TemplateResponse(
+        "export.html",
+        {"request": request}
+    )
+
+@app.post("/export/articles")
+async def export_articles(
+    request: Request,
+    start_date: str = Form(...),
+    end_date: str = Form(...),
+    keyword: str = Form(None),
+    file_format: str = Form("csv")
+):
+    """匯出文章資料"""
+    try:
+        db = next(get_db())
+        
+        # 建立查詢
+        query = select(Article).order_by(Article.published_at.desc())
+        
+        # 如果有日期範圍
+        if start_date and end_date:
+            start = datetime.strptime(f"{start_date} 00:00:00", '%Y-%m-%d %H:%M:%S')
+            end = datetime.strptime(f"{end_date} 23:59:59", '%Y-%m-%d %H:%M:%S')
+            query = query.where(Article.published_at.between(start, end))
+        
+        # 如果有關鍵字
+        if keyword:
+            query = query.where(Article.title.ilike(f'%{keyword}%'))
+        
+        # 執行查詢
+        result = db.execute(query)
+        articles = result.scalars().all()
+        
+        if not articles:
+            raise HTTPException(status_code=404, detail="找不到符合條件的文章")
+        
+        # 準備 CSV 資料
+        output = io.StringIO()
+        writer = csv.writer(output)
+        
+        # 寫入標題列
+        writer.writerow([
+            'ID', '標題', '來源', '分類', '記者', 
+            '發布時間', '內容', '連結', '圖片連結'
+        ])
+        
+        # 寫入資料列
+        for article in articles:
+            writer.writerow([
+                str(article.id),
+                str(article.title or ''),
+                str(article.source or ''),
+                str(article.category or ''),
+                str(article.reporter or ''),
+                article.published_at.strftime('%Y-%m-%d %H:%M:%S'),
+                str(article.content or ''),
+                str(article.url or ''),
+                str(article.image_url or '')
+            ])
+        
+        # 設定檔案名稱 - 移除中文關鍵字，只使用時間戳記
+        timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
+        if keyword:
+            filename = f"news_search_{timestamp}.csv"
+        else:
+            filename = f"news_{start_date}_to_{end_date}_{timestamp}.csv"
+        
+        # 準備回應
+        output.seek(0)
+        output_str = output.getvalue()
+        output_bytes = output_str.encode('utf-8-sig')
+        
+        return StreamingResponse(
+            io.BytesIO(output_bytes),
+            media_type="text/csv",
+            headers={
+                "Content-Disposition": f"attachment; filename={filename}",
+                "Content-Type": "text/csv; charset=utf-8-sig"
+            }
+        )
+        
+    except HTTPException as he:
+        raise he
+    except Exception as e:
+        logger.error(f"匯出文章時發生錯誤: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"匯出失敗: {str(e)}")
+
+@app.get("/rescrape")
+async def rescrape_page(request: Request):
+    """回補爬蟲頁面"""
+    return templates.TemplateResponse(
+        "rescrape.html",
+        {"request": request}
+    )
+
+@app.post("/api/rescrape")
+async def rescrape_articles(
+    request: Request,
+    start_date: str = Form(...),
+    end_date: str = Form(...),
+    source: str = Form(None)
+):
+    """執行回補爬蟲"""
+    try:
+        all_results = []
+        messages = [f"開始爬取新聞，日期範圍：{start_date} 到 {end_date}"]
+        
+        # 決定要爬取的來源
+        sources = ["ltn", "udn", "nextapple", "ettoday"]
+        crawlers_to_run = sources if source == 'all' else [source]
+        
+        # 執行每個爬蟲
+        for source_name in crawlers_to_run:
+            try:
+                messages.append(f"\n開始爬取 {source_name} 新聞...")
+                
+                # 使用 test_crawler 執行爬蟲
+                count = await test_crawler(
+                    crawler_type=source_name,
+                    start_date=start_date,
+                    end_date=end_date
+                )
+                
+                messages.append(f"成功爬取 {count} 篇文章")
+                
+            except Exception as e:
+                error_msg = f"爬取 {source_name} 時發生錯誤: {str(e)}"
+                messages.append(error_msg)
+                logger.error(error_msg)
+                continue  # 繼續執行其他爬蟲
+        
+        # 加入總結資訊
+        messages.append(f"\n爬取完成")
+        
+        return {
+            "status": "success",
+            "message": "\n".join(messages)
+        }
+        
+    except Exception as e:
+        logger.error(f"回補爬蟲失敗: {str(e)}")
+        return {
+            "status": "error",
+            "message": f"爬蟲失敗: {str(e)}"
+        }
