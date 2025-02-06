@@ -61,7 +61,7 @@ async def test_crawler(crawler_type="ltn", start_date=None, end_date=None):
 			elif crawler_type.lower() == "udn":
 				articles = await crawler.crawl(start_date=start_date, end_date=end_date)
 			elif crawler_type.lower() == "nextapple":
-				articles = await crawler.crawl(start_date=start_date, end_date=end_date)
+				articles = crawler.crawl(start_date=start_date, end_date=end_date)
 			elif crawler_type.lower() == "ettoday":
 				articles = await crawler.crawl(start_date=start_date, end_date=end_date)
 			elif crawler_type.lower() == "ebc":
