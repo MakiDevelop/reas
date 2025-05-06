@@ -44,3 +44,4 @@ logs/
 # Environment variables
 .env
 .env.local
+debug_files/
