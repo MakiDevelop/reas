@@ -6,7 +6,10 @@ from app.services.crawler.nextapple_crawler import NextAppleCrawler
 from app.services.crawler.ettoday_crawler import EttodayCrawler
 # from app.services.crawler.ebc_crawler import EbcCrawler  # 暫時註解掉
 from app.services.crawler.edgeprop_crawler import EdgePropCrawler
-from app.services.crawler.base import BaseCrawler
+from app.services.crawler.starproperty_crawler import StarPropertyCrawler
+from app.services.crawler.freemalaysiatoday_crawler import FreeMalaysiaTodayCrawler
+from app.services.crawler.hk852house_crawler import House852Crawler
+# from app.services.crawler.base import BaseCrawler
 from app.core.database import SessionLocal
 from app.models.article import Article
 import pytest
@@ -37,7 +40,10 @@ def get_crawler(crawler_name: str):
 		'nextapple': NextAppleCrawler(),
 		'ettoday': EttodayCrawler(),
 		# 'ebc': EbcCrawler()  # 暫時註解掉
-		'edgeprop': EdgePropCrawler()
+		'edgeprop': EdgePropCrawler(),
+		'starproperty': StarPropertyCrawler(),
+		'freemalaysiatoday': FreeMalaysiaTodayCrawler(),
+		'hk852house': House852Crawler()
 	}
 	return crawlers.get(crawler_name)
 
@@ -69,6 +75,12 @@ async def test_crawler(crawler_type="ltn", start_date=None, end_date=None):
 			# elif crawler_type.lower() == "ebc":
 			# 	articles = await crawler.crawl(start_date=start_date, end_date=end_date)
 			elif crawler_type.lower() == "edgeprop":
+				articles = await crawler.crawl(start_date=start_date, end_date=end_date)
+			elif crawler_type.lower() == "starproperty":
+				articles = await crawler.crawl(start_date=start_date, end_date=end_date)
+			elif crawler_type.lower() == "freemalaysiatoday":
+				articles = await crawler.crawl(start_date=start_date, end_date=end_date)
+			elif crawler_type.lower() == "hk852house":
 				articles = await crawler.crawl(start_date=start_date, end_date=end_date)
 			else:
 				raise ValueError(f"未知的爬蟲類型: {crawler_type}")
@@ -231,7 +243,7 @@ async def crawl_historical_data(start_date=None, end_date=None):
 	
 	try:
 		# 依序執行爬蟲
-		for crawler_name in ['ltn', 'udn', 'nextapple', 'ettoday', 'edgeprop']:
+		for crawler_name in ['ltn', 'udn', 'nextapple', 'ettoday', 'edgeprop', 'starproperty', 'freemalaysiatoday', 'hk852house']:
 			logging.info(f"開始執行 {crawler_name.upper()} 爬蟲...")
 			count = await test_crawler(crawler_name, start_date, end_date)
 			logging.info(f"{crawler_name.upper()} 爬蟲完成，共取得 {count} 篇文章")
@@ -245,7 +257,7 @@ async def crawl_historical_data(start_date=None, end_date=None):
 if __name__ == '__main__':
 	parser = argparse.ArgumentParser()
 	parser.add_argument('crawler', 
-					   choices=['ltn', 'udn', 'nextapple', 'ettoday', 'edgeprop'],
+					   choices=['ltn', 'udn', 'nextapple', 'ettoday', 'edgeprop', 'starproperty', 'freemalaysiatoday', 'hk852house'],
 					   help='指定要測試的爬蟲')
 	parser.add_argument('--start_date', 
 					   help='回補起始日期 (YYYY-MM-DD)',

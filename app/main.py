@@ -30,6 +30,9 @@ from app.services.crawler.udn_crawler import UDNCrawler
 from app.services.crawler.nextapple_crawler import NextAppleCrawler
 from app.services.crawler.ettoday_crawler import EttodayCrawler
 from app.services.crawler.edgeprop_crawler import EdgePropCrawler
+from app.services.crawler.starproperty_crawler import StarPropertyCrawler
+from app.services.crawler.freemalaysiatoday_crawler import FreeMalaysiaTodayCrawler
+from app.services.crawler.hk852house_crawler import House852Crawler
 
 # 設定日誌
 logging.basicConfig(level=logging.INFO)
@@ -60,7 +63,7 @@ async def run_crawler_in_background(crawler_type: str = "all", start_date: str =
             start_date = end_date = datetime.now().strftime("%Y-%m-%d")
             
         # 定義要爬取的新聞來源
-        sources = ["udn", "ltn", "nextapple", "ettoday", "edgeprop"] if crawler_type == "all" else [crawler_type]
+        sources = ["udn", "ltn", "nextapple", "ettoday", "edgeprop", "starproperty", "freemalaysiatoday", "hk852house"] if crawler_type == "all" else [crawler_type]
         
         for source in sources:
             try:
@@ -327,7 +330,7 @@ async def crawl_last_week(background_tasks: BackgroundTasks):
 def run_crawler_process(start_date, end_date):
     """在新的 Process 中執行爬蟲"""
     async def run():
-        for source in ["ltn", "udn", "nextapple", "ettoday", "edgeprop"]:
+        for source in ["ltn", "udn", "nextapple", "ettoday", "edgeprop", "starproperty", "freemalaysiatoday", "hk852house"]:
             try:
                 logger.info(f"開始爬取 {source} 文章...")
                 count = await test_crawler(
@@ -364,7 +367,7 @@ async def crawl_articles(
                 "source": source,
                 "status": "started",
                 "message": "開始執行爬蟲"
-            } for source in ["ltn", "udn", "nextapple", "ettoday", "edgeprop"]]
+            } for source in ["ltn", "udn", "nextapple", "ettoday", "edgeprop", "starproperty", "freemalaysiatoday", "hk852house"]]
         }
         
     except Exception as e:
@@ -590,7 +593,7 @@ async def rescrape_articles(
         messages = [f"開始爬取新聞，日期範圍：{start_date} 到 {end_date}"]
         
         # 決定要爬取的來源
-        sources = ["ltn", "udn", "nextapple", "ettoday", "edgeprop"]
+        sources = ["ltn", "udn", "nextapple", "ettoday", "edgeprop", "starproperty", "freemalaysiatoday", "hk852house"]
         crawlers_to_run = sources if source == 'all' else [source]
         
         # 執行每個爬蟲
