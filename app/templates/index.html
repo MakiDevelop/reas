@@ -127,9 +127,10 @@
         </div>
         {% endif %}
 
-        <!-- 修改後的卡片視圖，使用CSS替代無圖片情況 -->
+        <!-- 修改後的卡片視圖，增加檢查確保文章數據完整 -->
         <div id="cardView" class="row g-4">
             {% for article in articles %}
+            {% if article and article.id and article.title %}
             <div class="col-md-3">
                 <div class="card article-card h-100">
                     {% if article.image_url %}
@@ -143,10 +144,10 @@
                     <span class="badge bg-primary source-badge">{{ article.source }}</span>
                     <div class="card-body">
                         <h5 class="card-title" style="font-size: 1.1rem;">{{ article.title }}</h5>
-                        <p class="card-text description">{{ article.description or article.content[:100] }}...</p>
+                        <p class="card-text description">{{ article.description or article.content[:100] or '無內容摘要' }}...</p>
                         <div class="mt-auto">
                             <small class="text-muted d-block mb-2">
-                                {{ article.published_at.strftime('%Y-%m-%d %H:%M') }}
+                                {% if article.published_at %}{{ article.published_at.strftime('%Y-%m-%d %H:%M') }}{% else %}未知日期{% endif %}
                                 {% if article.reporter %}<br>記者: {{ article.reporter }}{% endif %}
                                 {% if article.category %}<br>{{ article.category }}{% endif %}
                             </small>
@@ -155,10 +156,11 @@
                     </div>
                 </div>
             </div>
+            {% endif %}
             {% endfor %}
         </div>
 
-        <!-- 表格視圖保持不變 -->
+        <!-- 表格視圖也增加檢查 -->
         <div id="tableView" class="row g-4" style="display: none;">
             <div class="col-12">
                 <div class="table-responsive">
@@ -175,16 +177,18 @@
                         </thead>
                         <tbody>
                             {% for article in articles %}
+                            {% if article and article.id and article.title %}
                             <tr>
                                 <td>{{ article.title }}</td>
                                 <td><span class="badge bg-primary">{{ article.source }}</span></td>
                                 <td>{{ article.category or '-' }}</td>
-                                <td>{{ article.published_at.strftime('%Y-%m-%d %H:%M') }}</td>
+                                <td>{% if article.published_at %}{{ article.published_at.strftime('%Y-%m-%d %H:%M') }}{% else %}未知日期{% endif %}</td>
                                 <td>{{ article.reporter or '-' }}</td>
                                 <td>
                                     <a href="/article/{{ article.id }}" class="btn btn-outline-primary btn-sm">閱讀全文</a>
                                 </td>
                             </tr>
+                            {% endif %}
                             {% endfor %}
                         </tbody>
                     </table>
