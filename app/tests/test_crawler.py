@@ -4,12 +4,10 @@ from app.services.crawler.ltn_crawler import LTNCrawler
 from app.services.crawler.udn_crawler import UDNCrawler
 from app.services.crawler.nextapple_crawler import NextAppleCrawler
 from app.services.crawler.ettoday_crawler import EttodayCrawler
-# from app.services.crawler.ebc_crawler import EbcCrawler  # 暫時註解掉
 from app.services.crawler.edgeprop_crawler import EdgePropCrawler
 from app.services.crawler.starproperty_crawler import StarPropertyCrawler
 from app.services.crawler.freemalaysiatoday_crawler import FreeMalaysiaTodayCrawler
 from app.services.crawler.hk852house_crawler import House852Crawler
-# from app.services.crawler.base import BaseCrawler
 from app.core.database import SessionLocal
 from app.models.article import Article
 import pytest
@@ -39,7 +37,6 @@ def get_crawler(crawler_name: str):
 		'udn': UDNCrawler(),
 		'nextapple': NextAppleCrawler(),
 		'ettoday': EttodayCrawler(),
-		# 'ebc': EbcCrawler()  # 暫時註解掉
 		'edgeprop': EdgePropCrawler(),
 		'starproperty': StarPropertyCrawler(),
 		'freemalaysiatoday': FreeMalaysiaTodayCrawler(),
@@ -72,8 +69,6 @@ async def test_crawler(crawler_type="ltn", start_date=None, end_date=None):
 				articles = crawler.crawl(start_date=start_date, end_date=end_date)
 			elif crawler_type.lower() == "ettoday":
 				articles = await crawler.crawl(start_date=start_date, end_date=end_date)
-			# elif crawler_type.lower() == "ebc":
-			# 	articles = await crawler.crawl(start_date=start_date, end_date=end_date)
 			elif crawler_type.lower() == "edgeprop":
 				articles = await crawler.crawl(start_date=start_date, end_date=end_date)
 			elif crawler_type.lower() == "starproperty":

@@ -99,7 +99,7 @@ class EdgePropCrawler(BaseCrawler):
                 url = f"{self.news_url}"
             else:
                 # 第二頁開始使用搜索頁面並帶上page參數
-                url = f"{self.base_url}/news/search?field_category_value=editorpick&combine=&page={page-1}"
+                url = f"{self.base_url}/news/search?field_category_value=news&combine=&page={page-1}"
             
             logger.info(f"正在訪問列表頁: {url}")
             self.wait_and_get(url)
