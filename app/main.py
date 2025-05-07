@@ -422,155 +422,176 @@ async def test_scheduler():
         )
 
 @app.get("/export/latest")
-async def export_latest(db: Session = Depends(get_db)):
-    """匯出最新1000筆文章為Excel"""
-    try:
-        # 查詢最新1000筆文章
-        articles = db.query(Article)\
-            .order_by(desc(Article.published_at))\
-            .limit(1000)\
-            .all()
-        
-        # 準備資料
-        data = []
-        for article in articles:
-            data.append({
-                'ID': article.id,
-                '標題': article.title,
-                '來源': article.source,
-                '網址': article.url,
-                '發布時間': article.published_at,
-                '建立時間': article.created_at,
-                '更新時間': article.updated_at,
-                '內容': article.content,
-                '描述': article.description or ''
-            })
-        
-        # 建立 DataFrame
-        df = pd.DataFrame(data)
-        
-        # 建立 BytesIO 物件
-        output = io.BytesIO()
-        
-        # 寫入 Excel
-        with pd.ExcelWriter(output, engine='openpyxl') as writer:
-            df.to_excel(writer, index=False, sheet_name='文章列表')
-        
-        # 將指針移到開頭
-        output.seek(0)
-        
-        # 建立檔案名稱
-        filename = f"articles_export_{datetime.now().strftime('%Y%m%d_%H%M%S')}.xlsx"
-        
-        # 回傳串流響應
-        headers = {
-            'Content-Disposition': f'attachment; filename="{filename}"',
-            'Content-Type': 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'
-        }
-        
-        return StreamingResponse(
-            output,
-            headers=headers,
-            media_type='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'
-        )
-            
-    except Exception as e:
-        logger.error(f"匯出Excel時發生錯誤: {str(e)}")
-        raise HTTPException(
-            status_code=500,
-            detail=f"匯出失敗: {str(e)}"
-        )
+async def export_latest(source: str = None, db: Session = Depends(get_db)):
+	"""匯出最新1000筆文章為Excel，可以指定來源"""
+	try:
+		# 建立查詢
+		query = db.query(Article).order_by(desc(Article.published_at))
+		
+		# 如果指定了來源且不是 'all'，則進行過濾
+		if source and source != 'all':
+			query = query.filter(Article.source == source)
+		
+		# 限制最多1000筆
+		articles = query.limit(1000).all()
+		
+		# 準備資料
+		data = []
+		for article in articles:
+			data.append({
+				'ID': article.id,
+				'標題': article.title,
+				'來源': article.source,
+				'網址': article.url,
+				'發布時間': article.published_at,
+				'建立時間': article.created_at,
+				'更新時間': article.updated_at,
+				'內容': article.content,
+				'描述': article.description or ''
+			})
+		
+		# 建立 DataFrame
+		df = pd.DataFrame(data)
+		
+		# 建立 BytesIO 物件
+		output = io.BytesIO()
+		
+		# 寫入 Excel
+		with pd.ExcelWriter(output, engine='openpyxl') as writer:
+			df.to_excel(writer, index=False, sheet_name='文章列表')
+		
+		# 將指針移到開頭
+		output.seek(0)
+		
+		# 建立檔案名稱，如果有指定來源，則加入來源名稱
+		source_text = f"_{source}" if source and source != 'all' else ""
+		filename = f"articles_export{source_text}_{datetime.now().strftime('%Y%m%d_%H%M%S')}.xlsx"
+		
+		# 回傳串流響應
+		headers = {
+			'Content-Disposition': f'attachment; filename="{filename}"',
+			'Content-Type': 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'
+		}
+		
+		return StreamingResponse(
+			output,
+			headers=headers,
+			media_type='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'
+		)
+			
+	except Exception as e:
+		logger.error(f"匯出Excel時發生錯誤: {str(e)}")
+		raise HTTPException(
+			status_code=500,
+			detail=f"匯出失敗: {str(e)}"
+		)
 
 @app.get("/export")
-async def export_page(request: Request):
-    """匯出資料頁面"""
-    return templates.TemplateResponse(
-        "export.html",
-        {"request": request}
-    )
+async def export_page(request: Request, source: str = None):
+	"""匯出資料頁面，可以預設指定來源"""
+	# 取得所有可用的新聞來源
+	db = next(get_db())
+	sources = db.query(Article.source).distinct().all()
+	sources = [s[0] for s in sources]
+	
+	return templates.TemplateResponse(
+		"export.html",
+		{
+			"request": request,
+			"selected_source": source,  # 傳遞預選的來源
+			"sources": sources  # 傳遞所有可用的來源
+		}
+	)
 
 @app.post("/export/articles")
 async def export_articles(
-    request: Request,
-    start_date: str = Form(...),
-    end_date: str = Form(...),
-    keyword: str = Form(None),
-    file_format: str = Form("csv")
+	request: Request,
+	start_date: str = Form(...),
+	end_date: str = Form(...),
+	keyword: str = Form(None),
+	source: str = Form(None),  # 添加來源參數
+	file_format: str = Form("csv")
 ):
-    """匯出文章資料"""
-    try:
-        db = next(get_db())
-        
-        # 建立查詢
-        query = select(Article).order_by(Article.published_at.desc())
-        
-        # 如果有日期範圍
-        if start_date and end_date:
-            start = datetime.strptime(f"{start_date} 00:00:00", '%Y-%m-%d %H:%M:%S')
-            end = datetime.strptime(f"{end_date} 23:59:59", '%Y-%m-%d %H:%M:%S')
-            query = query.where(Article.published_at.between(start, end))
-        
-        # 如果有關鍵字
-        if keyword:
-            query = query.where(Article.title.ilike(f'%{keyword}%'))
-        
-        # 執行查詢
-        result = db.execute(query)
-        articles = result.scalars().all()
-        
-        if not articles:
-            raise HTTPException(status_code=404, detail="找不到符合條件的文章")
-        
-        # 準備 CSV 資料
-        output = io.StringIO()
-        writer = csv.writer(output)
-        
-        # 寫入標題列
-        writer.writerow([
-            'ID', '標題', '來源', '分類', '記者', 
-            '發布時間', '內容', '連結', '圖片連結'
-        ])
-        
-        # 寫入資料列
-        for article in articles:
-            writer.writerow([
-                str(article.id),
-                str(article.title or ''),
-                str(article.source or ''),
-                str(article.category or ''),
-                str(article.reporter or ''),
-                article.published_at.strftime('%Y-%m-%d %H:%M:%S'),
-                str(article.content or ''),
-                str(article.url or ''),
-                str(article.image_url or '')
-            ])
-        
-        # 設定檔案名稱 - 移除中文關鍵字，只使用時間戳記
-        timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
-        if keyword:
-            filename = f"news_search_{timestamp}.csv"
-        else:
-            filename = f"news_{start_date}_to_{end_date}_{timestamp}.csv"
-        
-        # 準備回應
-        output.seek(0)
-        output_str = output.getvalue()
-        output_bytes = output_str.encode('utf-8-sig')
-        
-        return StreamingResponse(
-            io.BytesIO(output_bytes),
-            media_type="text/csv",
-            headers={
-                "Content-Disposition": f"attachment; filename={filename}",
-                "Content-Type": "text/csv; charset=utf-8-sig"
-            }
-        )
-        
-    except HTTPException as he:
-        raise he
-    except Exception as e:
-        logger.error(f"匯出文章時發生錯誤: {str(e)}")
-        raise HTTPException(status_code=500, detail=f"匯出失敗: {str(e)}")
+	"""匯出文章資料"""
+	try:
+		db = next(get_db())
+		
+		# 建立查詢
+		query = select(Article).order_by(Article.published_at.desc())
+		
+		# 如果有日期範圍
+		if start_date and end_date:
+			start = datetime.strptime(f"{start_date} 00:00:00", '%Y-%m-%d %H:%M:%S')
+			end = datetime.strptime(f"{end_date} 23:59:59", '%Y-%m-%d %H:%M:%S')
+			query = query.where(Article.published_at.between(start, end))
+		
+		# 如果有關鍵字
+		if keyword:
+			query = query.where(Article.title.ilike(f'%{keyword}%'))
+		
+		# 如果有指定來源且不是 'all'
+		if source and source != 'all':
+			query = query.where(Article.source == source)
+		
+		# 執行查詢
+		result = db.execute(query)
+		articles = result.scalars().all()
+		
+		if not articles:
+			raise HTTPException(status_code=404, detail="找不到符合條件的文章")
+		
+		# 準備 CSV 資料
+		output = io.StringIO()
+		writer = csv.writer(output)
+		
+		# 寫入標題列
+		writer.writerow([
+			'ID', '標題', '來源', '分類', '記者', 
+			'發布時間', '內容', '連結', '圖片連結'
+		])
+		
+		# 寫入資料列
+		for article in articles:
+			writer.writerow([
+				str(article.id),
+				str(article.title or ''),
+				str(article.source or ''),
+				str(article.category or ''),
+				str(article.reporter or ''),
+				article.published_at.strftime('%Y-%m-%d %H:%M:%S'),
+				str(article.content or ''),
+				str(article.url or ''),
+				str(article.image_url or '')
+			])
+		
+		# 設定檔案名稱 - 加入來源資訊
+		timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
+		source_text = f"_{source}" if source and source != 'all' else ""
+		
+		if keyword:
+			filename = f"news_search{source_text}_{timestamp}.csv"
+		else:
+			filename = f"news{source_text}_{start_date}_to_{end_date}_{timestamp}.csv"
+		
+		# 準備回應
+		output.seek(0)
+		output_str = output.getvalue()
+		output_bytes = output_str.encode('utf-8-sig')
+		
+		return StreamingResponse(
+			io.BytesIO(output_bytes),
+			media_type="text/csv",
+			headers={
+				"Content-Disposition": f"attachment; filename={filename}",
+				"Content-Type": "text/csv; charset=utf-8-sig"
+			}
+		)
+		
+	except HTTPException as he:
+		raise he
+	except Exception as e:
+		logger.error(f"匯出文章時發生錯誤: {str(e)}")
+		raise HTTPException(status_code=500, detail=f"匯出失敗: {str(e)}")
 
 @app.get("/rescrape")
 async def rescrape_page(request: Request):
