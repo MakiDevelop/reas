@@ -35,7 +35,7 @@ class LTNCrawler(BaseCrawler):
                 
                 article_data = []
                 for article in articles_data:
-                    url = article.get('url', '').replace('\/', '/')
+                    url = article.get('url', '').replace('\\/', '/')
                     date_str = article.get('A_PublishDT', '')
                     title = article.get('title', '')
                     summary = article.get('summary', '')

@@ -19,6 +19,7 @@ class BaseCrawler(ABC):
     def __init__(self):
         self.driver = None
         self.source_name = ""
+        self.needs_javascript = True  # 預設需要 JavaScript，子類可以覆寫
     
     def setup_driver(self):
         """設置 Chrome Driver"""
@@ -38,7 +39,9 @@ class BaseCrawler(ABC):
             chrome_options.add_argument('--disable-notifications')
             chrome_options.add_argument('--disable-logging')
             chrome_options.add_argument('--disable-software-rasterizer')
-            chrome_options.add_argument('--disable-javascript')  # 如果不需要 JS
+            # 只在不需要 JavaScript 時才禁用
+            if not self.needs_javascript:
+                chrome_options.add_argument('--disable-javascript')
             chrome_options.add_argument('--blink-settings=imagesEnabled=false')  # 不載入圖片
             
             # 記憶體優化
