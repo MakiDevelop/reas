@@ -5,8 +5,11 @@ services:
       - "8000:8000"
     volumes:
       - .:/app
+    env_file:
+      - .env
     environment:
-      - DATABASE_URL=postgresql://user:password@db:5432/newsdb
+      - POSTGRES_SERVER=db
+      - POSTGRES_PASSWORD=password
     depends_on:
       - db
 

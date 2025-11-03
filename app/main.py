@@ -35,7 +35,8 @@ from app.services.crawler.freemalaysiatoday_crawler import FreeMalaysiaTodayCraw
 from app.services.crawler.hk852house_crawler import House852Crawler
 
 # 設定日誌
-logging.basicConfig(level=logging.INFO)
+from app.core.logging_config import setup_logging
+setup_logging()
 logger = logging.getLogger(__name__)
 
 app = FastAPI(
@@ -327,22 +328,57 @@ async def crawl_last_week(background_tasks: BackgroundTasks):
         return RedirectResponse(url="/?error=crawl_failed", status_code=303)
 
 # 建立一個新的 Process 來執行爬蟲
-def run_crawler_process(start_date, end_date):
-    """在新的 Process 中執行爬蟲"""
+def run_crawler_process(start_date, end_date, parallel=True):
+    """在新的 Process 中執行爬蟲（支援並行爬取）"""
+    async def run_single_crawler(source: str):
+        """執行單個爬蟲（帶異常處理）"""
+        try:
+            logger.info(f"開始爬取 {source} 文章...")
+            count = await test_crawler(
+                crawler_type=source,
+                start_date=start_date,
+                end_date=end_date
+            )
+            logger.info(f"✅ {source} 爬蟲完成，共爬取 {count} 篇文章")
+            return {source: {'status': 'success', 'count': count}}
+        except Exception as e:
+            logger.error(f"❌ {source} 爬蟲失敗: {str(e)}", exc_info=True)
+            return {source: {'status': 'failed', 'error': str(e)}}
+
     async def run():
-        for source in ["ltn", "udn", "nextapple", "ettoday", "edgeprop", "starproperty", "freemalaysiatoday", "hk852house"]:
-            try:
-                logger.info(f"開始爬取 {source} 文章...")
-                count = await test_crawler(
-                    crawler_type=source,
-                    start_date=start_date,
-                    end_date=end_date
-                )
-                logger.info(f"{source} 爬蟲完成，共爬取 {count} 篇文章")
-            except Exception as e:
-                logger.error(f"{source} 爬蟲失敗: {str(e)}")
-            await asyncio.sleep(2)
-    
+        sources = ["ltn", "udn", "nextapple", "ettoday", "edgeprop", "starproperty", "freemalaysiatoday", "hk852house"]
+
+        if parallel:
+            # 並行爬取
+            logger.info(f"並行爬取 {len(sources)} 個來源...")
+            tasks = [run_single_crawler(source) for source in sources]
+            results_list = await asyncio.gather(*tasks, return_exceptions=True)
+
+            # 整合結果
+            results = {}
+            for result in results_list:
+                if isinstance(result, dict):
+                    results.update(result)
+                elif isinstance(result, Exception):
+                    logger.error(f"爬蟲任務異常: {str(result)}")
+        else:
+            # 串行爬取
+            logger.info(f"串行爬取 {len(sources)} 個來源...")
+            results = {}
+            for source in sources:
+                result = await run_single_crawler(source)
+                results.update(result)
+                await asyncio.sleep(2)  # 串行模式下添加延遲
+
+        # 記錄總結
+        success_count = sum(1 for r in results.values() if r.get('status') == 'success')
+        failed_count = len(sources) - success_count
+        total_articles = sum(r.get('count', 0) for r in results.values() if r.get('status') == 'success')
+
+        logger.info(f"爬蟲執行完成：成功 {success_count} 個，失敗 {failed_count} 個，共爬取 {total_articles} 篇文章")
+
+        return results
+
     asyncio.run(run())
 
 @app.post("/api/crawl")

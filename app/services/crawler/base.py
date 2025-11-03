@@ -12,6 +12,13 @@ from datetime import datetime
 from typing import Optional, List, Dict, Any, Tuple
 from selenium.common.exceptions import TimeoutException
 import random
+from tenacity import (
+    retry,
+    stop_after_attempt,
+    wait_exponential,
+    retry_if_exception_type,
+    before_sleep_log
+)
 
 logger = logging.getLogger(__name__)
 
@@ -96,39 +103,43 @@ class BaseCrawler(ABC):
             finally:
                 self.driver = None
     
-    def wait_and_get(self, url: str, max_retries: int = 3) -> None:
-        """等待頁面載入完成"""
-        for attempt in range(max_retries):
+    @retry(
+        stop=stop_after_attempt(3),
+        wait=wait_exponential(multiplier=1, min=2, max=10),
+        retry=retry_if_exception_type((TimeoutException, ConnectionError)),
+        before_sleep=before_sleep_log(logger, logging.WARNING)
+    )
+    def wait_and_get(self, url: str) -> None:
+        """等待頁面載入完成（帶重試機制）"""
+        try:
+            # 加入隨機延遲
+            delay = random.uniform(
+                settings.CRAWLER_DELAY_MIN,
+                settings.CRAWLER_DELAY_MAX
+            )
+            time.sleep(delay)
+
+            self.driver.get(url)
+
+            # 等待頁面主要元素載入
+            WebDriverWait(self.driver, 5).until(
+                lambda d: d.execute_script('return document.readyState') == 'complete'
+            )
+
+        except TimeoutException as e:
+            logger.warning(f"Timeout loading URL: {url}")
+            # 重試前清除快取
             try:
-                # 加入隨機延遲
-                time.sleep(random.uniform(1, 3))
-                
-                self.driver.get(url)
-                
-                # 等待頁面主要元素載入，縮短等待時間
-                WebDriverWait(self.driver, 5).until(
-                    lambda d: d.execute_script('return document.readyState') == 'complete'
-                )
-                return
-                
-            except TimeoutException:
-                logger.warning(f"Timeout on attempt {attempt + 1} for URL: {url}")
-                # 重試前清除快取
                 self.driver.execute_script("window.localStorage.clear();")
                 self.driver.execute_script("window.sessionStorage.clear();")
                 self.driver.delete_all_cookies()
-                
-                if attempt == max_retries - 1:
-                    raise
-                continue
-                
-            except Exception as e:
-                logger.error(f"Error loading page {url}: {str(e)}")
-                if attempt == max_retries - 1:
-                    raise
-                # 重試前暫停較長時間
-                time.sleep(random.uniform(2, 5))
-                continue
+            except:
+                pass
+            raise
+
+        except Exception as e:
+            logger.error(f"Error loading page {url}: {str(e)}")
+            raise
     
     def parse_date_range(self, start_date: Optional[str], end_date: Optional[str]) -> Tuple[Optional[datetime], Optional[datetime]]:
         """解析日期範圍"""
@@ -145,6 +156,103 @@ class BaseCrawler(ABC):
         if end_datetime and article_date.date() > end_datetime.date():
             return False
         return True
+
+    @staticmethod
+    def parse_flexible_date(date_text: str) -> Optional[datetime]:
+        """
+        統一的日期解析邏輯，支援多種日期格式
+
+        Args:
+            date_text: 日期文字
+
+        Returns:
+            datetime 物件或 None
+        """
+        if not date_text:
+            return None
+
+        # 清理日期文字
+        date_text = date_text.strip()
+
+        # 移除可能的干擾文字
+        for remove_text in ["|", "Updated", "發布", "更新"]:
+            if remove_text in date_text:
+                date_text = date_text.split(remove_text)[0].strip()
+
+        # 嘗試多種日期格式
+        date_formats = [
+            '%Y-%m-%d %H:%M:%S',  # 2025-01-01 12:00:00
+            '%Y-%m-%d %H:%M',     # 2025-01-01 12:00
+            '%Y-%m-%d',           # 2025-01-01
+            '%Y/%m/%d %H:%M:%S',  # 2025/01/01 12:00:00
+            '%Y/%m/%d %H:%M',     # 2025/01/01 12:00
+            '%Y/%m/%d',           # 2025/01/01
+            '%d %b %Y',           # 01 Jan 2025
+            '%B %d, %Y',          # January 01, 2025
+            '%b %d, %Y',          # Jan 01, 2025
+            '%d/%m/%Y',           # 01/01/2025
+            '%m/%d/%Y',           # 01/01/2025
+        ]
+
+        for date_format in date_formats:
+            try:
+                return datetime.strptime(date_text, date_format)
+            except ValueError:
+                continue
+
+        logger.warning(f"無法解析日期: {date_text}")
+        return None
+
+    @staticmethod
+    def clean_content(content: str, ad_texts: List[str] = None) -> str:
+        """
+        統一的內容清理邏輯
+
+        Args:
+            content: 原始內容
+            ad_texts: 要移除的廣告文字列表
+
+        Returns:
+            清理後的內容
+        """
+        import re
+
+        if not content:
+            return ""
+
+        # 預設廣告文字
+        default_ads = [
+            "不用抽 不用搶 現在用APP看新聞 保證天天中獎",
+            "點我下載APP",
+            "按我看活動辦法",
+            "請繼續往下閱讀...",
+            "Subscribe to our Telegram channel",
+            "Click to subscribe",
+            "Follow us on",
+            "For the latest property news",
+        ]
+
+        ad_texts = ad_texts or []
+        all_ads = default_ads + ad_texts
+
+        # 移除廣告文字
+        for ad in all_ads:
+            content = content.replace(ad, "")
+
+        # 移除多餘的空白行
+        lines = [line.strip() for line in content.split('\n')]
+        lines = [line for line in lines if line]
+
+        # 移除重複的行
+        lines = list(dict.fromkeys(lines))
+
+        # 重新組合內容
+        content = '\n'.join(lines)
+
+        # 移除連續的空格
+        content = re.sub(r'\s+', ' ', content).strip()
+
+        return content
     
     @abstractmethod
     async def crawl_list(self, page: int = 1) -> list:

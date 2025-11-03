@@ -25,6 +25,10 @@ class Article(Base):
         Index('idx_title_source', 'title', 'source'),
         # 發布日期 + 來源的複合索引，用於排序和過濾
         Index('idx_published_source', 'published_at', 'source'),
+        # 分類索引，用於按分類篩選
+        Index('idx_category', 'category'),
+        # 創建時間索引，用於管理和清理
+        Index('idx_created_at', 'created_at'),
     )
 
     def __repr__(self):

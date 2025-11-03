@@ -82,43 +82,46 @@ async def test_crawler(crawler_type="ltn", start_date=None, end_date=None):
 			
 			logger.info(f"爬取到 {len(articles)} 篇文章")
 			
-			# 存入資料庫
-			saved_count = 0
-			updated_count = 0
+			# 存入資料庫（使用批次操作）
 			db = SessionLocal()
 			try:
+				from app.core.db_utils import batch_upsert_articles
+
+				# 準備文章資料
+				article_data_list = []
 				for article in articles:
-					# 檢查是否需要轉換成 Article 物件
 					if isinstance(article, dict):
-						article_obj = Article(
-							url=article.get('url'),
-							title=article.get('title'),
-							content=article.get('content'),
-							published_at=article.get('published_at'),
-							source=crawler_type.lower(),
-							image_url=article.get('image_url'),
-							description=article.get('description')
-						)
+						article_data = {
+							'url': article.get('url'),
+							'title': article.get('title'),
+							'content': article.get('content'),
+							'published_at': article.get('published_at'),
+							'source': crawler_type.lower(),
+							'image_url': article.get('image_url'),
+							'description': article.get('description'),
+							'category': article.get('category'),
+							'reporter': article.get('reporter'),
+						}
 					else:
-						article_obj = article
-					
-					# 檢查文章是否已存在
-					existing = db.query(Article).filter(Article.url == article_obj.url).first()
-					if existing:
-						logger.info(f"更新文章: {article_obj.title}")
-						for key, value in article_obj.__dict__.items():
-							if key != '_sa_instance_state':
-								setattr(existing, key, value)
-						updated_count += 1
-					else:
-						logger.info(f"新增文章: {article_obj.title}")
-						db.add(article_obj)
-						saved_count += 1
-					db.commit()
-				
+						article_data = {
+							'url': article.url,
+							'title': article.title,
+							'content': article.content,
+							'published_at': article.published_at,
+							'source': crawler_type.lower(),
+							'image_url': article.image_url,
+							'description': article.description,
+							'category': getattr(article, 'category', None),
+							'reporter': getattr(article, 'reporter', None),
+						}
+					article_data_list.append(article_data)
+
+				# 批次 upsert
+				saved_count, updated_count = batch_upsert_articles(db, article_data_list, batch_size=50)
+
 				logger.info(f"完成！新增: {saved_count} 篇，更新: {updated_count} 篇")
 				return len(articles)
-				
+
 			except Exception as e:
 				logger.error(f"資料庫操作失敗: {str(e)}")
 				db.rollback()
