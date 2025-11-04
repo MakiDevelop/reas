@@ -1,4 +1,5 @@
 from abc import ABC, abstractmethod
+import os
 from selenium import webdriver
 from selenium.webdriver.chrome.service import Service
 from selenium.webdriver.chrome.options import Options
@@ -56,33 +57,47 @@ class BaseCrawler(ABC):
             chrome_options.add_argument('--disable-features=TranslateUI')
             chrome_options.add_argument('--disable-features=BlinkGenPropertyTrees')
             
-            # 設定頁面載入策略
-            chrome_options.set_capability('pageLoadStrategy', 'none')
+            # 設定頁面載入策略，在慢速連線上更穩定
+            chrome_options.set_capability('pageLoadStrategy', 'eager')
             
             # 記錄設定
             logger.info(f"Setting up Chrome driver with options: {chrome_options.arguments}")
             
-            # 設定 Chrome 二進制檔案位置
-            chrome_binary_location = "/usr/bin/chromium"
-            chrome_options.binary_location = chrome_binary_location
-            logger.info(f"Chrome binary location: {chrome_binary_location}")
+            # 設定 Chrome 二進制檔案位置（若存在）
+            chrome_binary_location = settings.CHROME_BIN
+            if chrome_binary_location and os.path.exists(chrome_binary_location):
+                chrome_options.binary_location = chrome_binary_location
+                logger.info(f"Chrome binary location: {chrome_binary_location}")
+            else:
+                logger.warning(
+                    "Chrome binary not found at %s, falling back to system default",
+                    chrome_binary_location
+                )
             
-            # 設定 ChromeDriver 路徑
-            chromedriver_path = "/usr/bin/chromedriver"
-            logger.info(f"ChromeDriver path: {chromedriver_path}")
-            
-            # 建立 Service 物件
-            service = Service(executable_path=chromedriver_path)
+            # 設定 ChromeDriver 路徑（若存在）
+            chromedriver_path = settings.CHROMEDRIVER_PATH
+            service = None
+            if chromedriver_path and os.path.exists(chromedriver_path):
+                logger.info(f"ChromeDriver path: {chromedriver_path}")
+                service = Service(executable_path=chromedriver_path)
+            else:
+                logger.warning(
+                    "ChromeDriver not found at %s, Selenium will try system PATH",
+                    chromedriver_path
+                )
             
             # 建立 WebDriver
-            self.driver = webdriver.Chrome(
-                service=service,
-                options=chrome_options
-            )
+            if service:
+                self.driver = webdriver.Chrome(
+                    service=service,
+                    options=chrome_options
+                )
+            else:
+                self.driver = webdriver.Chrome(options=chrome_options)
             
-            # 設定較短的超時時間
-            self.driver.set_page_load_timeout(20)  # 縮短到 20 秒
-            self.driver.set_script_timeout(20)
+            # 設定較長的超時時間，提高在慢速環境的穩定性
+            self.driver.set_page_load_timeout(settings.CRAWLER_PAGE_LOAD_TIMEOUT)
+            self.driver.set_script_timeout(settings.CRAWLER_SCRIPT_TIMEOUT)
             
             logger.info(f"{self.source_name} crawler driver setup completed")
             
@@ -109,8 +124,22 @@ class BaseCrawler(ABC):
         retry=retry_if_exception_type((TimeoutException, ConnectionError)),
         before_sleep=before_sleep_log(logger, logging.WARNING)
     )
-    def wait_and_get(self, url: str) -> None:
-        """等待頁面載入完成（帶重試機制）"""
+    def wait_and_get(
+        self,
+        url: str,
+        wait_selector: Optional[str] = None,
+        wait_by: By = By.CSS_SELECTOR,
+        wait_timeout: Optional[int] = None
+    ) -> None:
+        """
+        等待頁面載入完成（帶重試機制）
+
+        Args:
+            url: 目標網址
+            wait_selector: 如需等待特定元素出現，提供 CSS/Selenium selector
+            wait_by: 搭配 wait_selector 使用的定位方式
+            wait_timeout: 自訂等待秒數，預設使用設定檔值
+        """
         try:
             # 加入隨機延遲
             delay = random.uniform(
@@ -121,12 +150,18 @@ class BaseCrawler(ABC):
 
             self.driver.get(url)
 
-            # 等待頁面主要元素載入
-            WebDriverWait(self.driver, 5).until(
-                lambda d: d.execute_script('return document.readyState') == 'complete'
-            )
+            timeout = wait_timeout or settings.CRAWLER_WAIT_TIMEOUT
 
-        except TimeoutException as e:
+            if wait_selector:
+                WebDriverWait(self.driver, timeout).until(
+                    EC.presence_of_element_located((wait_by, wait_selector))
+                )
+            else:
+                WebDriverWait(self.driver, timeout).until(
+                    lambda d: d.execute_script('return document.readyState') in ("complete", "interactive")
+                )
+
+        except TimeoutException:
             logger.warning(f"Timeout loading URL: {url}")
             # 重試前清除快取
             try:
@@ -135,7 +170,7 @@ class BaseCrawler(ABC):
                 self.driver.delete_all_cookies()
             except:
                 pass
-            raise
+            raise TimeoutException(f"Timeout loading URL: {url}") from None
 
         except Exception as e:
             logger.error(f"Error loading page {url}: {str(e)}")

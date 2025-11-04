@@ -1,6 +1,9 @@
 from datetime import datetime
+from urllib.parse import urlparse
 from bs4 import BeautifulSoup
 import logging
+from selenium.common.exceptions import TimeoutException
+from tenacity import RetryError
 from .base import BaseCrawler
 import time
 
@@ -11,14 +14,42 @@ class EttodayCrawler(BaseCrawler):
         super().__init__()
         self.source_name = "ETtoday房產雲"
         self.base_url = "https://house.ettoday.net/"
+        self.allowed_domain = "ettoday.net"
 
-    async def get_page_source(self, url):
+    def _should_skip_url(self, url: str) -> bool:
+        """檢查是否為影片頁或外部連結"""
+        if not url:
+            return True
+
+        if 'video.php' in url:
+            return True
+
+        parsed = urlparse(url)
+        # 相對路徑視為合法
+        if not parsed.netloc:
+            return False
+
+        return not parsed.netloc.endswith(self.allowed_domain)
+
+    async def get_page_source(self, url, wait_selector=None, wait_timeout=None):
         """使用 Selenium 獲取頁面內容"""
         try:
             logger.debug(f"正在訪問頁面: {url}")
-            self.driver.get(url)
-            time.sleep(2)  # 等待頁面加載
+            self.wait_and_get(
+                url,
+                wait_selector=wait_selector,
+                wait_timeout=wait_timeout
+            )
+            # 再稍微等待，確保動態內容渲染完畢
+            time.sleep(1)
             return self.driver.page_source
+        except TimeoutException:
+            logger.error(f"等待頁面載入逾時: {url}")
+            return None
+        except RetryError as retry_err:
+            last_exc = retry_err.last_attempt.exception() if retry_err.last_attempt else retry_err
+            logger.error(f"多次嘗試仍無法載入: {url} ({last_exc})")
+            return None
         except Exception as e:
             logger.error(f"獲取頁面內容時發生錯誤: {str(e)}")
             return None
@@ -26,7 +57,11 @@ class EttodayCrawler(BaseCrawler):
     async def crawl_list(self, page=1):
         """爬取文章列表"""
         try:
-            html = await self.get_page_source(self.base_url)
+            html = await self.get_page_source(
+                self.base_url,
+                wait_selector=".part_txt_1, .block_1 .gallery_3 .piece",
+                wait_timeout=20
+            )
             if not html:
                 return []
             
@@ -49,6 +84,9 @@ class EttodayCrawler(BaseCrawler):
                 url = link.get('href', '')
                 if not url.startswith('http'):
                     url = self.base_url.rstrip('/') + url
+                if self._should_skip_url(url):
+                    logger.debug(f"跳過非文章或影片連結: {url}")
+                    continue
 
                 # 找到圖片
                 img = piece.find('img')
@@ -82,6 +120,9 @@ class EttodayCrawler(BaseCrawler):
                     url = article.get('href', '')
                     if not url.startswith('http'):
                         url = 'https://house.ettoday.net' + url
+                    if self._should_skip_url(url):
+                        logger.debug(f"跳過非文章或影片連結: {url}")
+                        continue
 
                     # 找到對應的圖片
                     article_parent = article.find_parent('div', class_='col')
@@ -108,6 +149,9 @@ class EttodayCrawler(BaseCrawler):
             unique_articles = []
             seen_urls = set()
             for article in articles:
+                if self._should_skip_url(article['url']):
+                    logger.debug(f"去重前跳過非文章連結: {article['url']}")
+                    continue
                 if article['url'] not in seen_urls:
                     seen_urls.add(article['url'])
                     unique_articles.append(article)
@@ -130,7 +174,15 @@ class EttodayCrawler(BaseCrawler):
     async def crawl_article(self, url):
         """爬取文章內容"""
         try:
-            html = await self.get_page_source(url)
+            if self._should_skip_url(url):
+                logger.debug(f"跳過非文章連結（文章階段）: {url}")
+                return None
+
+            html = await self.get_page_source(
+                url,
+                wait_selector=".story, .story-content, article",
+                wait_timeout=25
+            )
             if not html:
                 return None
                 
@@ -249,6 +301,9 @@ class EttodayCrawler(BaseCrawler):
             
             articles = []
             for article in articles_list:
+                if self._should_skip_url(article['url']):
+                    logger.debug(f"跳過非文章連結（資料處理）: {article['url']}")
+                    continue
                 article_content = await self.crawl_article(article['url'])
                 if article_content:
                     # 檢查文章日期是否在指定範圍內

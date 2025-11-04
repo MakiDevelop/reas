@@ -38,6 +38,9 @@ class Settings(BaseSettings):
     CRAWLER_TIMEOUT: int = 30
     CRAWLER_DELAY_MIN: int = 1
     CRAWLER_DELAY_MAX: int = 3
+    CRAWLER_PAGE_LOAD_TIMEOUT: int = 40
+    CRAWLER_SCRIPT_TIMEOUT: int = 40
+    CRAWLER_WAIT_TIMEOUT: int = 15
 
     # 日誌設定
     LOG_LEVEL: str = "INFO"
