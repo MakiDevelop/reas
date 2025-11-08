@@ -86,67 +86,45 @@ async def run_crawler_in_background(crawler_type: str = "all", start_date: str =
     except Exception as e:
         logger.error(f"爬蟲執行失敗: {str(e)}")
 
-async def crawl_today():
-    """排程爬蟲任務"""
+async def crawl_yesterday():
+    """排程爬蟲任務 - 爬取前一天的文章"""
     logger.info(f"開始執行排程爬蟲任務: {datetime.now()}")
     try:
-        # 取得今天日期
-        today = datetime.now().strftime("%Y-%m-%d")
-        
+        # 取得昨天日期
+        yesterday = (datetime.now() - timedelta(days=1)).strftime("%Y-%m-%d")
+
+        logger.info(f"準備爬取前一天 ({yesterday}) 的文章")
+
         # 建立新的 Process 來執行爬蟲
         process = multiprocessing.Process(
             target=run_crawler_process,
-            args=(today, today)
+            args=(yesterday, yesterday)
         )
         process.start()
-        
+
         logger.info(f"排程爬蟲任務已啟動: {datetime.now()}")
-        
+
     except Exception as e:
         logger.error(f"排程爬蟲任務失敗: {str(e)}")
 
 # 設定排程任務
 def setup_scheduler():
     try:
-        # 每天 8:00 執行 (台灣時間)
+        # 每天 8:00 執行 (台灣時間) - 爬取前一天的文章
         scheduler.add_job(
-            crawl_today,
+            crawl_yesterday,
             CronTrigger(hour=8, minute=0, timezone=timezone('Asia/Taipei')),
-            id='crawl_8am',
+            id='crawl_yesterday_8am',
             replace_existing=True
         )
-        
-        # 每天 12:00 執行 (台灣時間)
-        scheduler.add_job(
-            crawl_today,
-            CronTrigger(hour=12, minute=0, timezone=timezone('Asia/Taipei')),
-            id='crawl_12pm',
-            replace_existing=True
-        )
-        
-        # 每天 16:00 執行 (台灣時間)
-        scheduler.add_job(
-            crawl_today,
-            CronTrigger(hour=16, minute=0, timezone=timezone('Asia/Taipei')),
-            id='crawl_4pm',
-            replace_existing=True
-        )
-        
-        # 每天 20:00 執行 (台灣時間)
-        scheduler.add_job(
-            crawl_today,
-            CronTrigger(hour=20, minute=0, timezone=timezone('Asia/Taipei')),
-            id='crawl_8pm',
-            replace_existing=True
-        )
-        
-        # 動排程器
+
+        # 啟動排程器
         scheduler.start()
         logger.info(f"排程器已啟動: {datetime.now(timezone('Asia/Taipei'))}")
         logger.info("已設定的排程任務:")
         for job in scheduler.get_jobs():
             logger.info(f"- {job.id}: 下次執行時間 {job.next_run_time}")
-            
+
     except Exception as e:
         logger.error(f"設定排程器時發生錯誤: {str(e)}")
 
@@ -445,9 +423,9 @@ async def test_scheduler():
     """立即執行排程任務進行測試"""
     try:
         logger.info("開始測試排程任務")
-        await crawl_today()
+        await crawl_yesterday()
         return JSONResponse({
-            "message": "排程任務測試已啟動，請查看日誌",
+            "message": "排程任務測試已啟動（爬取前一天文章），請查看日誌",
             "time": str(datetime.now())
         })
     except Exception as e:
