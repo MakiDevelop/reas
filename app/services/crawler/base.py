@@ -29,18 +29,30 @@ class BaseCrawler(ABC):
         self.source_name = ""
         self.needs_javascript = True  # 預設需要 JavaScript，子類可以覆寫
     
-    def setup_driver(self):
-        """設置 Chrome Driver"""
+    def setup_driver(self, stealth_mode: bool = False):
+        """設置 Chrome Driver
+
+        Args:
+            stealth_mode: 是否啟用隱身模式（用於繞過 Cloudflare 等反爬蟲機制）
+        """
         try:
             chrome_options = webdriver.ChromeOptions()
-            
+
             # 基本設定
-            chrome_options.add_argument('--headless')
+            chrome_options.add_argument('--headless=new')  # 使用新版 headless 模式
             chrome_options.add_argument('--no-sandbox')
             chrome_options.add_argument('--disable-dev-shm-usage')
             chrome_options.add_argument('--disable-gpu')
             chrome_options.add_argument('--window-size=1920,1080')
-            
+
+            # 防偵測設定（用於繞過 Cloudflare）
+            chrome_options.add_argument('--disable-blink-features=AutomationControlled')
+            chrome_options.add_experimental_option('excludeSwitches', ['enable-automation'])
+            chrome_options.add_experimental_option('useAutomationExtension', False)
+
+            # 設定真實的 User-Agent
+            chrome_options.add_argument('--user-agent=Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36')
+
             # 效能優化
             chrome_options.add_argument('--disable-extensions')
             chrome_options.add_argument('--disable-infobars')
@@ -50,8 +62,11 @@ class BaseCrawler(ABC):
             # 只在不需要 JavaScript 時才禁用
             if not self.needs_javascript:
                 chrome_options.add_argument('--disable-javascript')
-            chrome_options.add_argument('--blink-settings=imagesEnabled=false')  # 不載入圖片
-            
+
+            # 在隱身模式下不禁用圖片（有些網站會檢測）
+            if not stealth_mode:
+                chrome_options.add_argument('--blink-settings=imagesEnabled=false')  # 不載入圖片
+
             # 記憶體優化
             chrome_options.add_argument('--disable-features=site-per-process')
             chrome_options.add_argument('--disable-features=TranslateUI')
@@ -94,11 +109,29 @@ class BaseCrawler(ABC):
                 )
             else:
                 self.driver = webdriver.Chrome(options=chrome_options)
-            
+
+            # 隱藏 webdriver 屬性，繞過 Cloudflare 偵測
+            self.driver.execute_cdp_cmd('Page.addScriptToEvaluateOnNewDocument', {
+                'source': '''
+                    Object.defineProperty(navigator, 'webdriver', {
+                        get: () => undefined
+                    });
+                    Object.defineProperty(navigator, 'plugins', {
+                        get: () => [1, 2, 3, 4, 5]
+                    });
+                    Object.defineProperty(navigator, 'languages', {
+                        get: () => ['en-US', 'en']
+                    });
+                    window.chrome = {
+                        runtime: {}
+                    };
+                '''
+            })
+
             # 設定較長的超時時間，提高在慢速環境的穩定性
             self.driver.set_page_load_timeout(settings.CRAWLER_PAGE_LOAD_TIMEOUT)
             self.driver.set_script_timeout(settings.CRAWLER_SCRIPT_TIMEOUT)
-            
+
             logger.info(f"{self.source_name} crawler driver setup completed")
             
         except Exception as e:

@@ -62,7 +62,7 @@ async def test_crawler(crawler_type="ltn", start_date=None, end_date=None):
 		try:
 			# 根據不同爬蟲使用對應的方法
 			if crawler_type.lower() == "ltn":
-				articles = await crawler.run(max_pages=1, start_date=start_date, end_date=end_date)
+				articles = await crawler.crawl(start_date=start_date, end_date=end_date)
 			elif crawler_type.lower() == "udn":
 				articles = await crawler.crawl(start_date=start_date, end_date=end_date)
 			elif crawler_type.lower() == "nextapple":

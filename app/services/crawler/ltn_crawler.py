@@ -9,6 +9,7 @@ from bs4 import BeautifulSoup
 import time
 import re
 from typing import Optional
+from app.models.article import Article
 
 logger = logging.getLogger(__name__)
 
@@ -17,8 +18,83 @@ class LTNCrawler(BaseCrawler):
         super().__init__()
         self.source_name = "ltn"
         self.base_url = "https://estate.ltn.com.tw"
-        
-    async def crawl_list(self, page: int = 5) -> list:
+
+    async def crawl(self, start_date: str = None, end_date: str = None) -> list:
+        """
+        爬取入口
+        :param start_date: 起始日期 (YYYY-MM-DD)
+        :param end_date: 結束日期 (YYYY-MM-DD)
+        """
+        try:
+            # 只在 driver 尚未設置時才初始化
+            if not self.driver:
+                self.setup_driver()
+            articles = []
+            page = 1
+
+            # 解析日期範圍
+            start_datetime, end_datetime = self.parse_date_range(start_date, end_date)
+
+            # 設定最大頁數
+            if not start_date or (start_date == end_date == datetime.now().strftime("%Y-%m-%d")):
+                max_pages = 2
+            else:
+                max_pages = 10
+
+            logger.info(f"開始爬取 LTN，日期範圍: {start_date} ~ {end_date}，最大頁數: {max_pages}")
+
+            while page <= max_pages:
+                logger.info(f"開始爬取第 {page} 頁的文章列表")
+                article_list = await self.crawl_list(page)
+
+                if not article_list:
+                    logger.info(f"第 {page} 頁沒有文章，停止爬取")
+                    break
+
+                logger.info(f"第 {page} 頁找到 {len(article_list)} 篇文章")
+
+                has_valid_article = False
+                for index, article_info in enumerate(article_list, 1):
+                    published_at = article_info.get('published_at')
+
+                    # 檢查日期範圍
+                    if published_at:
+                        if not self.is_within_date_range(published_at, start_datetime, end_datetime):
+                            logger.debug(f"文章日期 {published_at} 不在範圍內，跳過")
+                            continue
+
+                    has_valid_article = True
+                    logger.info(f"正在爬取第 {page} 頁第 {index} 篇文章: {article_info.get('url')}")
+
+                    article_data = await self.crawl_article(article_info)
+                    if article_data:
+                        article = Article(
+                            title=article_data['title'],
+                            content=article_data['content'],
+                            url=article_data['url'],
+                            published_at=article_data['published_at'],
+                            source=article_data['source'],
+                            category='房地產',
+                            description=article_data.get('description'),
+                            image_url=article_data.get('image_url')
+                        )
+                        articles.append(article)
+                        logger.info(f"成功爬取文章: {article.title}")
+
+                # 如果這頁沒有符合日期範圍的文章，停止爬取
+                if not has_valid_article:
+                    logger.info("本頁沒有符合日期範圍的文章，停止爬取")
+                    break
+
+                page += 1
+
+            logger.info(f"LTN 爬蟲完成，總共爬取 {len(articles)} 篇文章")
+            return articles
+
+        finally:
+            self.cleanup()
+
+    async def crawl_list(self, page: int = 1) -> list:
         """爬取文章列表"""
         try:
             ajax_url = f"{self.base_url}/ajaxList/news/{page}"

@@ -3,8 +3,21 @@ from bs4 import BeautifulSoup
 import logging
 import time
 import re
+import random
 from typing import List, Optional, Dict, Any
 from .base import BaseCrawler
+
+try:
+    import cloudscraper
+    HAS_CLOUDSCRAPER = True
+except ImportError:
+    HAS_CLOUDSCRAPER = False
+
+try:
+    import undetected_chromedriver as uc
+    HAS_UNDETECTED = True
+except ImportError:
+    HAS_UNDETECTED = False
 
 logger = logging.getLogger(__name__)
 
@@ -14,12 +27,49 @@ class EdgePropCrawler(BaseCrawler):
         self.source_name = "EdgeProp Malaysia"
         self.base_url = "https://www.edgeprop.my"
         self.news_url = f"{self.base_url}/news"
-        
+        self.needs_javascript = True  # 需要 JavaScript 來處理 Cloudflare
+        self.uc_driver = None  # undetected chromedriver
+
+    def setup_undetected_driver(self):
+        """設置 undetected chromedriver 來繞過 Cloudflare"""
+        if not HAS_UNDETECTED:
+            logger.warning("undetected-chromedriver 未安裝")
+            return False
+
+        try:
+            options = uc.ChromeOptions()
+            options.add_argument('--no-sandbox')
+            options.add_argument('--disable-dev-shm-usage')
+            options.add_argument('--disable-gpu')
+            options.add_argument('--window-size=1920,1080')
+            options.add_argument('--headless=new')
+
+            self.uc_driver = uc.Chrome(options=options, version_main=120)
+            self.uc_driver.set_page_load_timeout(60)
+            logger.info("undetected chromedriver 設定完成")
+            return True
+        except Exception as e:
+            logger.error(f"設定 undetected chromedriver 失敗: {str(e)}")
+            return False
+
+    def cleanup(self):
+        """清理資源"""
+        super().cleanup()
+        if self.uc_driver:
+            try:
+                self.uc_driver.quit()
+            except:
+                pass
+            self.uc_driver = None
+
     async def crawl(self, start_date: Optional[str] = None, end_date: Optional[str] = None) -> List[Dict[str, Any]]:
         """執行爬蟲主程序"""
         try:
-            # 設定 Chrome Driver
-            self.setup_driver()
+            # 優先嘗試 undetected chromedriver
+            use_undetected = self.setup_undetected_driver()
+            if not use_undetected:
+                # 回退到普通 driver
+                self.setup_driver()
             logger.info("Chrome Driver 設定完成")
             
             # 確保 start_date 和 end_date 是 datetime.date 物件
@@ -90,8 +140,37 @@ class EdgePropCrawler(BaseCrawler):
         finally:
             self.cleanup()
     
+    def _wait_for_cloudflare(self, max_wait: int = 15) -> bool:
+        """等待 Cloudflare challenge 完成
+
+        Args:
+            max_wait: 最大等待時間（秒）
+
+        Returns:
+            是否成功通過 Cloudflare
+        """
+        start_time = time.time()
+        while time.time() - start_time < max_wait:
+            page_source = self.driver.page_source.lower()
+            # 檢查是否還在 Cloudflare challenge 頁面
+            if 'checking your browser' in page_source or 'cloudflare' in page_source:
+                logger.info("等待 Cloudflare challenge 完成...")
+                time.sleep(2)
+                continue
+            # 檢查是否被封鎖
+            if 'access denied' in page_source or '403 forbidden' in page_source:
+                logger.warning("被 Cloudflare 封鎖")
+                return False
+            # 檢查是否已經到達目標頁面
+            if 'edgeprop' in page_source:
+                logger.info("成功通過 Cloudflare")
+                return True
+            time.sleep(1)
+        logger.warning(f"等待 Cloudflare 超時 ({max_wait}秒)")
+        return False
+
     async def crawl_list(self, page: int = 1) -> List[Dict[str, Any]]:
-        """爬取文章列表頁"""
+        """爬取文章列表頁 - 使用 cloudscraper 繞過 Cloudflare"""
         try:
             # 構建分頁URL
             if page == 1:
@@ -100,13 +179,64 @@ class EdgePropCrawler(BaseCrawler):
             else:
                 # 第二頁開始使用搜索頁面並帶上page參數
                 url = f"{self.base_url}/news/search?field_category_value=news&combine=&page={page-1}"
-            
+
             logger.info(f"正在訪問列表頁: {url}")
-            self.wait_and_get(url)
-            time.sleep(3)  # 等待頁面加載
-            
+
+            # 添加隨機延遲
+            time.sleep(random.uniform(1, 3))
+
+            # 優先使用 cloudscraper 繞過 Cloudflare
+            html_content = None
+            if HAS_CLOUDSCRAPER:
+                try:
+                    scraper = cloudscraper.create_scraper(
+                        browser={
+                            'browser': 'chrome',
+                            'platform': 'windows',
+                            'mobile': False
+                        }
+                    )
+                    response = scraper.get(url, timeout=30)
+                    if response.status_code == 200:
+                        html_content = response.text
+                        logger.info("使用 cloudscraper 成功獲取頁面")
+                    else:
+                        logger.warning(f"cloudscraper 請求失敗，狀態碼: {response.status_code}")
+                except Exception as e:
+                    logger.warning(f"cloudscraper 失敗: {str(e)}")
+
+            # 如果 cloudscraper 失敗，嘗試 undetected chromedriver
+            if not html_content and self.uc_driver:
+                try:
+                    logger.info("嘗試使用 undetected chromedriver")
+                    self.uc_driver.get(url)
+                    time.sleep(random.uniform(5, 8))  # 等待 Cloudflare challenge
+
+                    # 檢查是否通過
+                    page_source = self.uc_driver.page_source.lower()
+                    if 'edgeprop' in page_source and 'checking your browser' not in page_source:
+                        html_content = self.uc_driver.page_source
+                        logger.info("使用 undetected chromedriver 成功獲取頁面")
+                    else:
+                        logger.warning("undetected chromedriver 未能通過 Cloudflare")
+                except Exception as e:
+                    logger.warning(f"undetected chromedriver 失敗: {str(e)}")
+
+            # 如果以上都失敗，回退到普通 Selenium
+            if not html_content:
+                logger.info("回退到普通 Selenium 方式")
+                self.wait_and_get(url)
+
+                # 等待 Cloudflare challenge 完成
+                if not self._wait_for_cloudflare():
+                    logger.error("無法通過 Cloudflare 保護")
+                    return []
+
+                time.sleep(random.uniform(3, 5))
+                html_content = self.driver.page_source
+
             # 解析頁面
-            soup = BeautifulSoup(self.driver.page_source, 'html.parser')
+            soup = BeautifulSoup(html_content, 'html.parser')
             
             # 找到文章列表容器 - 根據頁面類型選擇不同的選擇器
             container = None
@@ -187,17 +317,65 @@ class EdgePropCrawler(BaseCrawler):
             return []
     
     async def crawl_article(self, article_info: Dict[str, Any]) -> Optional[Dict[str, Any]]:
-        """爬取文章內容"""
+        """爬取文章內容 - 使用 cloudscraper 繞過 Cloudflare"""
         try:
             url = article_info.get('url')
             if not url:
                 return None
-            
+
             logger.info(f"正在爬取文章: {url}")
-            self.wait_and_get(url)
-            time.sleep(2)  # 等待頁面加載
-            
-            soup = BeautifulSoup(self.driver.page_source, 'html.parser')
+
+            # 添加隨機延遲
+            time.sleep(random.uniform(1, 3))
+
+            # 優先使用 cloudscraper
+            html_content = None
+            if HAS_CLOUDSCRAPER:
+                try:
+                    scraper = cloudscraper.create_scraper(
+                        browser={
+                            'browser': 'chrome',
+                            'platform': 'windows',
+                            'mobile': False
+                        }
+                    )
+                    response = scraper.get(url, timeout=30)
+                    if response.status_code == 200:
+                        html_content = response.text
+                        logger.info("使用 cloudscraper 成功獲取文章頁面")
+                    else:
+                        logger.warning(f"cloudscraper 請求文章失敗，狀態碼: {response.status_code}")
+                except Exception as e:
+                    logger.warning(f"cloudscraper 獲取文章失敗: {str(e)}")
+
+            # 如果 cloudscraper 失敗，嘗試 undetected chromedriver
+            if not html_content and self.uc_driver:
+                try:
+                    logger.info("嘗試使用 undetected chromedriver 獲取文章")
+                    self.uc_driver.get(url)
+                    time.sleep(random.uniform(3, 5))
+
+                    page_source = self.uc_driver.page_source.lower()
+                    if 'edgeprop' in page_source and 'checking your browser' not in page_source:
+                        html_content = self.uc_driver.page_source
+                        logger.info("使用 undetected chromedriver 成功獲取文章")
+                except Exception as e:
+                    logger.warning(f"undetected chromedriver 獲取文章失敗: {str(e)}")
+
+            # 如果以上都失敗，回退到普通 Selenium
+            if not html_content:
+                logger.info("回退到普通 Selenium 方式獲取文章")
+                self.wait_and_get(url)
+
+                # 等待 Cloudflare challenge 完成
+                if not self._wait_for_cloudflare():
+                    logger.warning(f"無法通過 Cloudflare 保護，跳過文章: {url}")
+                    return None
+
+                time.sleep(random.uniform(2, 4))
+                html_content = self.driver.page_source
+
+            soup = BeautifulSoup(html_content, 'html.parser')
             
             # 提取標題
             title_element = soup.select_one('div#content-top h1')
