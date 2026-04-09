@@ -27,6 +27,7 @@ class Settings(BaseSettings):
     POSTGRES_PASSWORD: str
     POSTGRES_SERVER: str = "db"
     POSTGRES_DB: str = "newsdb"
+    DB_PORT: int = 5432  # 外部 port，僅用於 docker-compose
     DATABASE_URL: Optional[str] = None
 
     # Chrome 設定

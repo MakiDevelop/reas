@@ -45,3 +45,8 @@ logs/
 .env
 .env.local
 debug_files/
+
+# Claude Code project config
+CLAUDE.md
+CLAUDE-*.md
+CLAUDE.zh-*.md
